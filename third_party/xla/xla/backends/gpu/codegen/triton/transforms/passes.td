@@ -246,12 +246,15 @@ def TritonXLAMathToLibdevicePass
   ];
 }
 
-def TritonXLAConvert0DTensorToScalarPass
-    : Pass<"triton-xla-convert-0d-tensor-to-scalar", "mlir::ModuleOp"> {
-  let summary = "Lowers 0D tensors to scalars.";
+
+def XTileLowerToTritonPass
+    : Pass<"xtile-lower-to-triton", "mlir::ModuleOp"> {
+  let summary = "Lowers XTile operations to their Triton equivalent.";
   let dependentDialects = [
+    "::mlir::triton::TritonDialect",
     "::xla::xtile::XTileDialect",
   ];
+  let constructor = "CreateXTileLowerToTritonPass()";
 }
 
 #endif  // XLA_BACKENDS_GPU_CODEGEN_TRITON_PASSES_TD_

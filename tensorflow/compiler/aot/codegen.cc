@@ -690,25 +690,22 @@ absl::Status ExtendRewrites(
 
   if (HasThunkKind(aot_thunks->proto().thunk_sequence(),
                    xla::cpu::ThunkProto::kConvolutionThunk)) {
-    if (xla_cpu_multi_thread_eigen) {
-      runtime_specific_includes.push_back(
-          R"(#include "xla/service/cpu/runtime_conv2d.h")");
-    }
-
     runtime_specific_includes.push_back(
-        R"(#include "xla/service/cpu/runtime_single_threaded_conv2d.h")");
+        R"(#include "absl/synchronization/notification.h")");
+    runtime_specific_includes.push_back(
+        R"(#include "xla/backends/cpu/runtime/convolution_lib.h")");
   }
 
   if (HasThunkKind(aot_thunks->proto().thunk_sequence(),
                    xla::cpu::ThunkProto::kSortThunk)) {
     runtime_specific_includes.push_back(
-        R"(#include "xla/service/cpu/runtime_key_value_sort.h")");
+        R"(#include "xla/backends/cpu/runtime/sort_lib.h")");
   }
 
   if (HasThunkKind(aot_thunks->proto().thunk_sequence(),
                    xla::cpu::ThunkProto::kTopKThunk)) {
     runtime_specific_includes.push_back(
-        R"(#include "xla/service/cpu/runtime_topk.h")");
+        R"(#include "xla/backends/cpu/runtime/topk_lib.h")");
   }
 
   TF_ASSIGN_OR_RETURN(

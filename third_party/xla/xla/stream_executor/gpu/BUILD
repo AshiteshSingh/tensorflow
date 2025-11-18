@@ -586,6 +586,7 @@ xla_test(
         "//xla/stream_executor:command_buffer",
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:kernel",
+        "//xla/stream_executor:kernel_args",
         "//xla/stream_executor:kernel_spec",
         "//xla/stream_executor:launch_dim",
         "//xla/stream_executor:platform",
@@ -597,13 +598,13 @@ xla_test(
         "//xla/tsl/lib/core:status_test_util",
         "//xla/tsl/platform:logging",
         "//xla/tsl/platform:statusor",
+        "//xla/tsl/util/proto:parse_text_proto",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "@com_google_googletest//:gtest",
         "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/platform:protobuf",
     ],
 )
 
@@ -1014,5 +1015,21 @@ cc_library(
         "//xla/backends/gpu/runtime:buffer_debug_log_structs",
         "//xla/stream_executor:device_memory",
         "//xla/stream_executor:kernel",
+    ],
+)
+
+cc_library(
+    name = "kernel_serialization_check",
+    testonly = True,
+    srcs = ["kernel_serialization_check.cc"],
+    hdrs = ["kernel_serialization_check.h"],
+    deps = [
+        "//xla/stream_executor:kernel_spec",
+        "//xla/stream_executor:kernel_symbol_registry",
+        "//xla/stream_executor:platform",
+        "//xla/tsl/platform:statusor",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_for_library",
     ],
 )

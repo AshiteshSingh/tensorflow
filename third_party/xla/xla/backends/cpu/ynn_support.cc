@@ -26,7 +26,7 @@ limitations under the License.
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/statusor.h"
-#include "xla/backends/cpu/runtime/dot_lib.h"
+#include "xla/backends/cpu/runtime/dot_dims.h"
 #include "xla/backends/cpu/runtime/ynnpack/ynn_interop.h"
 #include "xla/hlo/ir/hlo_casting_utils.h"
 #include "xla/hlo/ir/hlo_instruction.h"
@@ -246,6 +246,29 @@ bool IsReduceOpSupportedByYnn(const HloInstruction* hlo) {
                                             match::Minimum())
                    .WithBinaryOperandsAnyOrder(match::Parameter(0),
                                                match::Parameter(1)));
+}
+
+bool IsReduceOpOffloadedToYnn(const HloInstruction* hlo) {
+  if (!IsReduceOpSupportedByYnn(hlo)) {
+    return false;
+  }
+  const HloInstruction* input = hlo->operand(0);
+  if (ShapeUtil::ElementsIn(input->shape()) < 32 * 1024) {
+    return false;
+  }
+  switch (input->opcode()) {
+    case HloOpcode::kMultiply:
+    case HloOpcode::kBitcast:
+    case HloOpcode::kBroadcast:
+    case HloOpcode::kSlice:
+    case HloOpcode::kConcatenate:
+    case HloOpcode::kConvert:
+    case HloOpcode::kReshape:
+      return false;
+    default: {
+      return true;
+    }
+  }
 }
 
 uint32_t YnnFlags(const DebugOptions& debug_options) {

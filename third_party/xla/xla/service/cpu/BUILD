@@ -52,10 +52,6 @@ filegroup(
     name = "runtime_srcs",
     srcs = [
         # Single-threaded support.
-        "runtime_custom_call_status.cc",
-        "runtime_key_value_sort.cc",
-        "runtime_single_threaded_conv2d.cc",
-        "runtime_single_threaded_conv3d.cc",
         "runtime_single_threaded_matmul_c128.cc",
         "runtime_single_threaded_matmul_c64.cc",
         "runtime_single_threaded_matmul_common.h",
@@ -65,10 +61,7 @@ filegroup(
         "runtime_single_threaded_matmul_f64.cc",
         "runtime_single_threaded_matmul_s32.cc",
         "runtime_single_threaded_matmul_u8.cc",
-        "runtime_topk.cc",
         # Multi-threaded support.
-        "runtime_conv2d.cc",
-        "runtime_conv3d.cc",
         "runtime_matmul_c128.cc",
         "runtime_matmul_c64.cc",
         "runtime_matmul_common.h",
@@ -85,15 +78,8 @@ filegroup(
     name = "runtime_hdrs",
     srcs = [
         # Single-threaded support.
-        "runtime_custom_call_status.h",
-        "runtime_key_value_sort.h",
-        "runtime_single_threaded_conv2d.h",
-        "runtime_single_threaded_conv3d.h",
         "runtime_single_threaded_matmul.h",
-        "runtime_topk.h",
         # Multi-threaded support.
-        "runtime_conv2d.h",
-        "runtime_conv3d.h",
         "runtime_lightweight_check.h",
         "runtime_matmul.h",
         "//xla/backends/cpu/runtime:runtime_hdrs",
@@ -1049,46 +1035,10 @@ cc_library(
 
 cc_library(
     name = "runtime_conv2d",
-    srcs = ["runtime_conv2d.cc"],
-    hdrs = ["runtime_conv2d.h"],
-    copts = runtime_copts(),
-    visibility = ["//visibility:public"],
-    deps = [
-        ":runtime_lightweight_check",
-        "//xla:executable_run_options",
-        "//xla/backends/cpu/runtime:convolution_thunk_internal",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/synchronization",  # build_cleaner: keep
-        "@eigen_archive//:eigen3",
-    ],
 )
 
 cc_library(
     name = "runtime_conv3d",
-    srcs = ["runtime_conv3d.cc"],
-    hdrs = ["runtime_conv3d.h"],
-    copts = runtime_copts(),
-    visibility = ["//visibility:public"],
-    deps = [
-        ":runtime_lightweight_check",
-        "//xla:executable_run_options",
-        "//xla/backends/cpu/runtime:convolution_thunk_internal",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/synchronization",  # build_cleaner: keep
-        "@eigen_archive//:eigen3",
-    ],
-)
-
-cc_library(
-    name = "runtime_custom_call_status",
-    srcs = ["runtime_custom_call_status.cc"],
-    hdrs = ["runtime_custom_call_status.h"],
-    copts = runtime_copts(),
-    visibility = ["//visibility:public"],
-    deps = [
-        "//xla/service:custom_call_status_internal",
-        "@com_google_absl//absl/base:core_headers",
-    ],
 )
 
 cc_library(
@@ -1118,30 +1068,10 @@ cc_library(
 
 cc_library(
     name = "runtime_single_threaded_conv2d",
-    srcs = ["runtime_single_threaded_conv2d.cc"],
-    hdrs = ["runtime_single_threaded_conv2d.h"],
-    copts = runtime_copts(),
-    visibility = ["//visibility:public"],
-    deps = [
-        "//xla/backends/cpu/runtime:convolution_thunk_internal",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/synchronization",  # build_cleaner: keep
-        "@eigen_archive//:eigen3",
-    ],
 )
 
 cc_library(
     name = "runtime_single_threaded_conv3d",
-    srcs = ["runtime_single_threaded_conv3d.cc"],
-    hdrs = ["runtime_single_threaded_conv3d.h"],
-    copts = runtime_copts(),
-    visibility = ["//visibility:public"],
-    deps = [
-        "//xla/backends/cpu/runtime:convolution_thunk_internal",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/synchronization",  # build_cleaner: keep
-        "@eigen_archive//:eigen3",
-    ],
 )
 
 cc_library(
@@ -1200,28 +1130,7 @@ cc_library(
 
 cc_library(
     name = "runtime_key_value_sort",
-    srcs = ["runtime_key_value_sort.cc"],
-    hdrs = ["runtime_key_value_sort.h"],
-    copts = runtime_copts(),
     visibility = ["//visibility:public"],
-    deps = [
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/base:dynamic_annotations",
-        "@eigen_archive//:eigen3",
-    ],
-)
-
-cc_library(
-    name = "runtime_topk",
-    srcs = ["runtime_topk.cc"],
-    hdrs = ["runtime_topk.h"],
-    copts = runtime_copts(),
-    visibility = ["//visibility:public"],
-    deps = [
-        "@com_google_absl//absl/base",
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/base:dynamic_annotations",
-    ],
 )
 
 xla_cc_test(
