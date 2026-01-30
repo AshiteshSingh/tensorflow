@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 
 #include "absl/strings/string_view.h"
@@ -33,7 +34,6 @@ limitations under the License.
 
 namespace xla {
 
-class SymbolicExprContext;
 class SymbolicExprStorage;
 
 typedef int64_t VariableID;
@@ -84,8 +84,7 @@ class SymbolicExpr {
                               int64_t num_dims) const;
   SymbolicExpr ReplaceDimsAndSymbols(
       absl::Span<const SymbolicExpr> dim_replacements,
-      absl::Span<const SymbolicExpr> symbol_replacements,
-      int64_t num_dims) const;
+      absl::Span<const SymbolicExpr> symbol_replacements) const;
 
   SymbolicExpr Canonicalize() const;
 
@@ -153,14 +152,12 @@ H AbslHashValue(H h, const SymbolicExpr& expr) {
   return H::combine(std::move(h), hash_value(expr));
 }
 
-// This method should be called once per MLIRContext to register the
-// SymbolicExprStorage type with the MLIRContext's uniquifier. It should be
+// This method should be called once permlir::MLIRContext to register the
+// SymbolicExprStorage type with themlir::MLIRContext's uniquifier. It should be
 // called before any SymbolicExprs are created.
 void RegisterSymbolicExprStorage(mlir::MLIRContext* mlir_context);
 
-// Free functions to create SymbolicExpr.
-SymbolicExpr ParseSymbolicExpr(absl::string_view expr_str,
-                               mlir::MLIRContext* mlir_context);
+// Helpers to create SymbolicExprs.
 SymbolicExpr CreateSymbolicConstant(int64_t value,
                                     mlir::MLIRContext* mlir_context);
 SymbolicExpr CreateSymbolicVariable(int64_t var_id,
@@ -171,31 +168,23 @@ SymbolicExpr CreateSymbolicBinaryOp(SymbolicExprType type, SymbolicExpr lhs,
 llvm::SmallVector<SymbolicExpr> CreateSymbolicConstantExprs(
     llvm::ArrayRef<int64_t> constants, mlir::MLIRContext* mlir_context);
 
-// Deprecated. Use free functions taking mlir::MLIRContext* instead.
-class SymbolicExprContext {
- public:
-  explicit SymbolicExprContext(mlir::MLIRContext* mlir_context);
-  SymbolicExpr Parse(absl::string_view expr_str);
-  SymbolicExpr CreateConstant(int64_t value);
-  SymbolicExpr CreateVariable(int64_t var_id);
-  SymbolicExpr CreateBinaryOp(SymbolicExprType type, SymbolicExpr lhs,
-                              SymbolicExpr rhs);
-
-  bool operator==(const SymbolicExprContext& other) const;
-  bool operator!=(const SymbolicExprContext& other) const {
-    return !(*this == other);
-  }
-
-  mlir::MLIRContext* GetMLIRContext() const { return mlir_context_; }
-
- private:
-  SymbolicExpr GetOrCreate(SymbolicExprType type, int64_t value,
-                           SymbolicExpr lhs, SymbolicExpr rhs);
-  // TODO(b/446856305): MLIRContext is only used here temporarily while we have
-  // AffineMap <-> SymbolicMap convertors. In the future, we only will need a
-  // StorageUniquer pointer.
-  mlir::MLIRContext* mlir_context_;
-};
+// Parse a symbolic expression from `expr_str`. `num_dims` specifies the
+// number of dimension variables. It is used to determine a variable index from
+// a symbol id. For example, if `num_dims` is 2, 's0' parses to variable index
+// 2, 's1' to 3, etc.
+SymbolicExpr ParseSymbolicExpr(absl::string_view expr_str,
+                               mlir::MLIRContext* mlir_context,
+                               std::optional<int64_t> num_dims = std::nullopt);
+// Parses a symbolic expression from `expr_str`. Advances `expr_str` past the
+// parsed expression. Returns the parsed expression or null if parsing failed.
+SymbolicExpr ParseSymbolicExprAndAdvance(
+    absl::string_view* expr_str, mlir::MLIRContext* mlir_context,
+    std::optional<int64_t> num_dims = std::nullopt);
+// Uses `variable_map` to resolve variable names to symbolic expressions. If a
+// variable name is found in the map, the corresponding SymbolicExpr is used.
+SymbolicExpr ParseSymbolicExprAndAdvance(
+    absl::string_view* expr_str, mlir::MLIRContext* mlir_context,
+    const llvm::DenseMap<llvm::StringRef, SymbolicExpr>& variable_map);
 
 }  // namespace xla
 

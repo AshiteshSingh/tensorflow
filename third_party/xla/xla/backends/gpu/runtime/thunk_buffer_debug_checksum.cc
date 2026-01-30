@@ -30,12 +30,13 @@ limitations under the License.
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "xla/backends/gpu/ffi.h"
+#include "xla/backends/gpu/runtime/buffer_debug_log.pb.h"
 #include "xla/backends/gpu/runtime/buffer_debug_log_entry_metadata_store.h"
 #include "xla/backends/gpu/runtime/buffer_debug_log_structs.h"
 #include "xla/backends/gpu/runtime/buffers_checksum_thunk.h"
 #include "xla/backends/gpu/runtime/custom_call_thunk.h"
 #include "xla/backends/gpu/runtime/sequential_thunk.h"
-#include "xla/backends/gpu/runtime/shaped_slice.h"
 #include "xla/backends/gpu/runtime/thunk.h"
 #include "xla/backends/gpu/runtime/thunk_buffer_debug_filter.h"
 #include "xla/backends/gpu/runtime/thunk_pass_pipeline.h"
@@ -47,11 +48,14 @@ limitations under the License.
 #include "xla/runtime/buffer_use.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/dump.h"
+#include "xla/service/shaped_slice.h"
 #include "xla/shape.h"
+#include "xla/stream_executor/device_description.h"
 #include "xla/stream_executor/gpu/buffer_debug_log.h"
 #include "xla/stream_executor/stream.h"
 #include "xla/tsl/platform/errors.h"
 #include "xla/tsl/platform/statusor.h"
+#include "xla/xla.pb.h"
 #include "xla/xla_data.pb.h"
 
 namespace xla::gpu {
@@ -148,7 +152,7 @@ absl::Status DumpBufferDebugChecksumLog(
   const DebugOptions& debug_options = hlo_module->config().debug_options();
 
   auto buffer_debug_log =
-      se::gpu::BufferDebugLog<BufferDebugLogEntry>::FromDeviceMemoryUnchecked(
+      se::gpu::BufferDebugLog<BufferDebugLogEntry>::FromDeviceAddressUnchecked(
           log_buffer.device_memory());
   TF_ASSIGN_OR_RETURN(std::vector<BufferDebugLogEntry> log_entries,
                       buffer_debug_log.ReadFromDevice(*stream));
@@ -183,7 +187,8 @@ absl::StatusOr<std::unique_ptr<CustomCallThunk>> CreateDebugInitThunk(
   return CustomCallThunk::Create(
       Thunk::ThunkInfo(), "xla_gpu_buffer_debug_log_init",
       buffer_debug_init_bundle, /*operands=*/{shaped_log_slice},
-      /*results=*/{}, /*attributes=*/{}, hlo_module->entry_computation());
+      /*results=*/{}, /*attributes=*/{}, hlo_module->entry_computation(),
+      se::GpuComputeCapability());
 }
 
 absl::StatusOr<std::unique_ptr<CustomCallThunk>> CreateBufferDebugDumpThunk(
@@ -206,7 +211,8 @@ absl::StatusOr<std::unique_ptr<CustomCallThunk>> CreateBufferDebugDumpThunk(
       Thunk::ThunkInfo(), "xla_gpu_buffer_debug_log_dump",
       std::move(dump_bundle),
       /*operands=*/{shaped_log_slice},
-      /*results=*/{}, /*attributes=*/{}, hlo_module->entry_computation());
+      /*results=*/{}, /*attributes=*/{}, hlo_module->entry_computation(),
+      se::GpuComputeCapability());
 }
 
 }  // namespace

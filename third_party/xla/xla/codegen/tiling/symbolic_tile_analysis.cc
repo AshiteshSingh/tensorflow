@@ -31,6 +31,7 @@ limitations under the License.
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/container/hash_container_defaults.h"
 #include "absl/container/inlined_vector.h"
 #include "absl/hash/hash.h"
 #include "absl/log/check.h"
@@ -64,7 +65,6 @@ limitations under the License.
 #include "xla/hlo/analysis/indexing_map.h"
 #include "xla/hlo/analysis/indexing_map_serialization.h"
 #include "xla/hlo/analysis/interval.h"
-#include "xla/hlo/analysis/symbolic_expr.h"
 #include "xla/hlo/ir/hlo_computation.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_opcode.h"
@@ -97,7 +97,7 @@ using ::mlir::MLIRContext;
 // `ComputeOutputTilingInfo` creates a new instance of this struct.
 struct OutputTilingInfo {
   // The number of output tiles for each dimension of the root indexing.
-  // For example, ,if dimensions are [29, 16] and tile size is [4, 8] then
+  // For example, if dimensions are [29, 16] and tile size is [4, 8] then
   // `num_output_tiles_per_dim` will be [8, 2] = [29 ceildiv 4, 16 ceildiv 8].
   llvm::SmallVector<int64_t> num_output_tiles_per_dim;
 
@@ -107,7 +107,7 @@ struct OutputTilingInfo {
   // The dimensions of the indexing map correspond to the dimensions passed
   // to `ComputeOutputTilingInfo` and the number of dimensions is equal to the
   // size of `num_output_tiles_per_dim`. For example above it would look like:
-  //   `(pid_0, pid_1){rt0, rt1, ..} -> (<tile 0 offset>, <tile 1 offset>)`.
+  //   `(pid_0, pid_1){rt0, rt1, ..} -> (<tile offset 0>, <tile offset 1>)`.
   IndexingMap output_tile_offset_indexing;
 
   // The subset of tiling parameters that are active for this tiling, in
@@ -118,12 +118,12 @@ struct OutputTilingInfo {
   // order specified in `active_tiling_parameters`. For the example in
   // `output_tile_offset_indexing`, and with `active_tiling_parameters` set to
   // {0, 1} (row-major order), it would look like:
-  //   `(d0){rt0, rt1, ..} -> (<tile 0 offset>, <tile 1 offset>)`.
+  //   `(d0){rt0, rt1, ..} -> (<tile offset 1>, <tile offset 1>)`.
   // where pid_0 is replaced by (d0 floordiv 2) and pid_1 is replaced by
   // (d0 mod 2) in tile offset expressions.
   IndexingMap linear_output_tile_offset_indexing;
 
-  std::string ToString(const absl::string_view field_separator = "\n") {
+  std::string ToString(const absl::string_view field_separator = "\n") const {
     return absl::StrCat(
         "num_output_tiles_per_dim: ", num_output_tiles_per_dim.size(),
         field_separator, absl::StrJoin(num_output_tiles_per_dim, ", "),
@@ -157,11 +157,9 @@ llvm::SmallVector<int64_t> GetNumberOfTilesPerDimension(
 absl::StatusOr<OutputTilingInfo> ComputeOutputTilingInfo(
     const IndexingMap& root_indexing, absl::Span<const int64_t> tile_sizes,
     absl::Span<const int64_t> major_to_minor_active_tiling_parameters,
-    const TiledHloSchedule& schedule,
-    SymbolicExprContext* symbolic_expr_context,
+    const TiledHloSchedule& schedule, MLIRContext* mlir_context,
     const std::optional<absl::Span<const Interval>>&
         parent_output_tile_dim_bounds = std::nullopt) {
-  MLIRContext* mlir_context = symbolic_expr_context->GetMLIRContext();
   int64_t num_tiling_parameters = root_indexing.GetDimVarsCount();
   CHECK_EQ(num_tiling_parameters, tile_sizes.size());  // Crash OK
   CHECK_EQ(0, root_indexing.GetRangeVarsCount())
@@ -233,10 +231,9 @@ absl::StatusOr<OutputTilingInfo> ComputeOutputTilingInfo(
       dim_vars, /*range_vars=*/{}, /*rt_vars=*/root_indexing.GetRTVars(),
       constraints};
 
-  TF_ASSIGN_OR_RETURN(
-      IndexingMap program_id_to_tile_offsets,
-      schedule.Schedule(output_tile_offset_indexing, iteration_space,
-                        symbolic_expr_context));
+  TF_ASSIGN_OR_RETURN(IndexingMap program_id_to_tile_offsets,
+                      schedule.Schedule(output_tile_offset_indexing,
+                                        iteration_space, mlir_context));
   return OutputTilingInfo{outer_loop_bounds,
                           output_tile_offset_indexing,
                           {major_to_minor_active_tiling_parameters.begin(),
@@ -264,9 +261,7 @@ class SymbolicTiledHloFusionInstruction : public SymbolicTiledHloInstruction {
 // output.
 absl::StatusOr<IndexingMap> ComputeTileOffsetIndexing(
     const SymbolicTiledHloInstruction& tiled_hlo,
-    const IndexingMap& output_tile_offset_indexing,
-    SymbolicExprContext* symbolic_expr_context) {
-  MLIRContext* mlir_context = symbolic_expr_context->GetMLIRContext();
+    const IndexingMap& output_tile_offset_indexing, MLIRContext* mlir_context) {
   VLOG(4) << "ComputeTileOffsetIndexing, combining output "
           << ToString(output_tile_offset_indexing) << " with operation "
           << tiled_hlo.ToString();
@@ -340,7 +335,8 @@ absl::StatusOr<IndexingMap> ComputeTileOffsetIndexing(
 //   during the construction of TiledHloComputation from
 //   SymbolicTiledHloInstructions, we know that instruction are already sorted
 //   in def-before-use order.
-template <typename T>
+template <typename T, typename Hash = absl::DefaultHashContainerHash<T>,
+          typename Eq = absl::DefaultHashContainerEq<T>>
 class OrderedUniquePtrValueHashSet {
  public:
   // Inserts an element into the set.
@@ -365,12 +361,12 @@ class OrderedUniquePtrValueHashSet {
 
  private:
   struct PtrHash {
-    size_t operator()(const T* v) const { return absl::HashOf(*v); }
+    size_t operator()(const T* v) const { return Hash()(*v); }
   };
 
   struct PtrEqual {
     bool operator()(const T* lhs, const T* rhs) const {
-      return lhs == rhs || *lhs == *rhs;
+      return lhs == rhs || Eq()(*lhs, *rhs);
     }
   };
 
@@ -392,6 +388,35 @@ bool IsWithinNestedGemmFusion(const HloInstruction* hlo) {
 
   return false;
 }
+
+// !!!Warning!!! Do not blindly copy this hash operator: it is an implementation
+// detail specific to this analysis. It may give unexpected results in the
+// general case as it ignores operands.
+struct UnsafeSymbolicTiledHloInstructionOperandAgnosticHash {
+  size_t operator()(const SymbolicTiledHloInstruction& value) const {
+    return absl::HashOf(value.hlo(), value.indexing_map(),
+                        value.runtime_variables());
+  }
+};
+
+// !!!Warning!!! See above comment.
+struct UnsafeSymbolicTiledHloInstructionOperandAgnosticEq {
+  bool operator()(const SymbolicTiledHloInstruction& lhs,
+                  const SymbolicTiledHloInstruction& rhs) const {
+    return lhs.hlo() == rhs.hlo() && lhs.indexing_map() == rhs.indexing_map() &&
+           lhs.runtime_variables() == rhs.runtime_variables();
+  }
+};
+
+// As we traverse the fusion root to leaf and add operands to instructions as we
+// go, we ignore the operands from the hash / equality operators as they are not
+// intrinsic to two instructions being the same or not and will always end up
+// being the same after complete traversal.
+using UnsafeSymbolicTiledHloInstructionOrderedSet =
+    OrderedUniquePtrValueHashSet<
+        SymbolicTiledHloInstruction,
+        UnsafeSymbolicTiledHloInstructionOperandAgnosticHash,
+        UnsafeSymbolicTiledHloInstructionOperandAgnosticEq>;
 
 // Detects pathological cases on which symbolic tile derivation should bail out.
 // Note that this function bypasses temporary limitations of the infrastructure,
@@ -423,11 +448,9 @@ FusionDecision ShouldProceedWithSymbolicTileDerivation(
   if (hlo->opcode() == HloOpcode::kReshape ||
       hlo->opcode() == HloOpcode::kBitcast) {
     mlir::MLIRContext* ctx = indexing_map.GetMLIRContext();
-    // TODO(b/446856303): Get SymbolicExprContext from indexing_map.
-    SymbolicExprContext symbolic_expr_context(ctx);
+    // TODO(b/446856303): Get MLIRContext from indexing_map.
     IndexingMap reshape_indexing_map =
-        ComputeOutputToInputIndexing(hlo, /*output_id=*/0,
-                                     &symbolic_expr_context)
+        ComputeOutputToInputIndexing(hlo, /*output_id=*/0, ctx)
             .indexing_maps[0]
             .begin()
             ->map();
@@ -436,8 +459,8 @@ FusionDecision ShouldProceedWithSymbolicTileDerivation(
         SymbolicTile::FromIndexingMap(reshape_indexing_map);
 
     if (!reshape_symbolic_tile.has_value()) {
-      return FusionDecision::Forbid("Bailing out on reshape ")
-             << hlo->ToString() << " with indexing map "
+      return FusionDecision::Forbid("Bailing out on reshape")
+             << " " << hlo->ToString() << " with indexing map "
              << ToString(reshape_indexing_map);
     }
   }
@@ -625,12 +648,6 @@ bool ShouldDerivationSimplifyPointDimensions(const HloFusionAdaptor& fusion) {
   return true;
 }
 
-// Helper to handle nested parameters for `TilingSpecification::FromFusion`.
-// It is assumed that `num_tile_sizes_by_instruction` does not contain any
-// information regarding the nested tiling parameters of the fusion.
-//
-// `num_tile_sizes_by_instruction` is however allowed to contain information
-// regarding the tiling parameters of the fusion that are visible at the output.
 absl::Status PopulateNestedParameters(
     const HloFusionAdaptor& fusion,
     TilingSpecification::ParameterMapping& parameter_mapping) {
@@ -836,7 +853,7 @@ std::vector<int64_t> InputSpaceForParameterMapping(
 absl::StatusOr<IndexingMap> IndexingMapForRootInstruction(
     const HloInstruction* root,
     const TilingSpecification::ParameterMapping& parameter_mapping,
-    SymbolicExprContext* symbolic_expr_context) {
+    MLIRContext* mlir_context) {
   std::vector<int64_t> input_space =
       InputSpaceForParameterMapping(parameter_mapping);
   int64_t num_output_parameters = root->shape().dimensions().size();
@@ -852,14 +869,12 @@ absl::StatusOr<IndexingMap> IndexingMapForRootInstruction(
       for (int64_t parameter_index = num_hidden_parameters;
            parameter_index < num_tiling_parameters; ++parameter_index) {
         result_exprs.push_back(
-            mlir::getAffineDimExpr(dim_offset + parameter_index,
-                                   symbolic_expr_context->GetMLIRContext()));
+            mlir::getAffineDimExpr(dim_offset + parameter_index, mlir_context));
       }
       CHECK_EQ(result_exprs.size(), num_output_parameters);
 
       mlir::AffineMap affine_map = mlir::AffineMap::get(
-          input_space.size(), /*symbolCount=*/0, result_exprs,
-          symbolic_expr_context->GetMLIRContext());
+          input_space.size(), /*symbolCount=*/0, result_exprs, mlir_context);
 
       return IndexingMap::FromTensorSizes(affine_map, std::move(input_space),
                                           /*symbol_upper_bounds=*/{});
@@ -876,7 +891,7 @@ absl::StatusOr<IndexingMap> IndexingMapForRootInstruction(
 /*static*/ absl::StatusOr<RootIndexing> SymbolicTileAnalysis::GetRootIndexing(
     const HloFusionAdaptor& fusion,
     const TilingSpecification::ParameterMapping& parameter_mapping,
-    SymbolicExprContext* symbolic_expr_context) {
+    MLIRContext* mlir_context) {
   auto fusion_adaptor_roots = fusion.GetRoots();
 
   TF_ASSIGN_OR_RETURN(int64_t real_root_index,
@@ -892,26 +907,25 @@ absl::StatusOr<IndexingMap> IndexingMapForRootInstruction(
   TF_ASSIGN_OR_RETURN(
       IndexingMap indexing_map,
       IndexingMapForRootInstruction(roots[real_root_index], parameter_mapping,
-                                    symbolic_expr_context));
+                                    mlir_context));
 
   return RootIndexing{real_root_index, std::move(roots),
                       /*real_root_indexing=*/std::move(indexing_map)};
 }
 
 /*static*/ SymbolicTileAnalysisOrError SymbolicTileAnalysis::AnalyzeComputation(
-    const HloComputation& computation,
-    SymbolicExprContext* symbolic_expr_context,
+    const HloComputation& computation, MLIRContext* mlir_context,
     EmitterSpecificConstraintsBuilder emitter_specific_constraints_builder) {
   auto fusion = HloFusionAdaptor::ForComputation(&computation);
   return SymbolicTileAnalysis::AnalyzeFusion(
-      *fusion, symbolic_expr_context, emitter_specific_constraints_builder);
+      *fusion, mlir_context, emitter_specific_constraints_builder);
 }
 
 /*static*/ SymbolicTileAnalysisOrError
 SymbolicTileAnalysis::AnalyzeNestedFusion(
     const HloFusionAdaptor& fusion_adaptor,
     const TilingSpecification::ParameterMapping& parameter_mapping,
-    SymbolicExprContext* symbolic_expr_context, const IndexingMap& indexing_map,
+    MLIRContext* mlir_context, const IndexingMap& indexing_map,
     IndexingMap::SimplifyPointDimensions simplification_mode,
     EmitterSpecificConstraintsBuilder emitter_specific_constraints_builder,
     std::vector<SymbolicTiledHloInstruction*> root_runtime_variables) {
@@ -930,9 +944,9 @@ SymbolicTileAnalysis::AnalyzeNestedFusion(
                                     /*real_root_indexing=*/indexing_map};
 
   return SymbolicTileAnalysis::AnalyzeFusionImpl(
-      fusion_adaptor, parameter_mapping, symbolic_expr_context,
-      nested_root_indexing, simplification_mode,
-      emitter_specific_constraints_builder, root_runtime_variables);
+      fusion_adaptor, parameter_mapping, mlir_context, nested_root_indexing,
+      simplification_mode, emitter_specific_constraints_builder,
+      root_runtime_variables);
 }
 
 namespace {
@@ -1074,12 +1088,51 @@ struct ComposeIndexingResult {
 // and having mapping of C, we want to find the mapping of `foo` as operand B
 // operand in `bar`.
 // See comments in `ComposeIndexingMaps` for the details of the result.
+// Computed as follows:
+// 1. Composition: Merges the consumer's mapping with the operation's local
+//    logic. The first consumer is the ROOT of the fusion.
+// 2. Contracted Dim Replacement: Converts "hidden" symbols (like dot
+//    contractions) into global tiling parameters.
+// Eg:
+//   fused_computation {
+//     %p0 = f32[10, 20] parameter(0)
+//     %p1 = f32[20, 30] parameter(1)
+//     %neg = f32[10, 20] negate(%p0)
+//     ROOT %dot = f32[10, 30] dot(%neg, %p1),
+//       lhs_contracting_dims={1}, rhs_contracting_dims={0}
+//   }
+// Global Iteration Space
+// ----------------------
+//   d0: Contraction (K=20), d1: Output Rows (M=10), d2: Output Cols (N=30)
+// 1. %dot
+// ----------------------
+// The root %dot anchors the analysis to the global tiling parameters.
+// Root: (d0, d1, d2) -> (d1, d2)  // Parameters -> Output Coordinates
+//   a. Processing %operand.0 (%neg):
+//      Consumer Map: (d0, d1, d2) -> (d1, d2)  // The mapping from the root
+//      Operand Mapping:  (i, j)[s0] -> (i, s0) // Dot Output -> LHS Input
+//      Contracted Dim Replacement: (i, j, s0) -> (i, s0)
+//                                  // Symbol s0 is replaced by global parameter
+//                                  // d0.
+//      Result Map:   (d0, d1, d2) -> (d1, d0)  // Row d1 (M), Col d0 (K)
+//   b. Processing %operand.1 (%p1):
+//      Consumer Map: (d0, d1, d2) -> (d1, d2)  // The mapping from the root
+//      Operand Mapping:  (i, j)[s0] -> (s0, j) // Dot Output -> RHS Input
+//      Contracted Dim Replacement: (i, j, s0) -> (i, s0)
+//                                  // Symbol s0 is replaced by global parameter
+//                                  // d0.
+//      Result Map:   (d0, d1, d2) -> (d0, d2)  // Row d0 (K), Col d2 (N)
+// 2. %neg
+// ----------------------
+//   a. Processing operand.0 (%p0):
+//      Consumer Map: (d0, d1, d2) -> (d1, d0)  // The requirement derived in 1a
+//      Operand Mapping:  (i, j) -> (i, j)      // Negate is elementwise
+//      Result Map:   (d0, d1, d2) -> (d1, d0)  // Pass through.
 ComposeIndexingResult ComposeInstructionIndexing(
     SymbolicTiledHloInstruction* tiled_hlo_instruction,
     const OperandIndexing& operand_indexing,
     IndexingMap::SimplifyPointDimensions simplification_mode,
-    OrderedUniquePtrValueHashSet<SymbolicTiledHloInstruction>&
-        tiled_hlo_instructions_set,
+    UnsafeSymbolicTiledHloInstructionOrderedSet& tiled_hlo_instructions_set,
     HloInstructionAdaptor operand, HloInstructionAdaptor& instruction_adaptor,
     int64_t operand_pos,
     const TilingSpecification::ParameterMapping& parameter_mapping) {
@@ -1128,7 +1181,7 @@ ComposeIndexingResult ComposeInstructionIndexing(
     IndexingMap rt_map =
         ComposeIndexingMaps(tiled_hlo_instruction->indexing_map(), rt_var.map);
     HloInstructionAdaptor hlo_adaptor =
-        instruction_adaptor.parent().GetInstruction(rt_var.hlo);
+        instruction_adaptor.parent().GetInstruction(rt_var.hlo());
     auto tiled_runtime_var = std::make_unique<SymbolicTiledHloInstruction>(
         &hlo_adaptor.instruction(), rt_map,
         tiled_hlo_instruction->runtime_variables());
@@ -1154,10 +1207,10 @@ ComposeIndexingResult ComposeInstructionIndexing(
 }
 
 std::vector<OperandIndexingSet> GetOperandIndexingMaps(
-    const HloInstruction* hlo, SymbolicExprContext* symbolic_expr_context) {
+    const HloInstruction* hlo, MLIRContext* mlir_context) {
   std::vector<OperandIndexingSet> indexing_maps;
   HloInstructionIndexing operands_indexing =
-      ComputeOutputToInputIndexing(hlo, /*output_id=*/0, symbolic_expr_context);
+      ComputeOutputToInputIndexing(hlo, /*output_id=*/0, mlir_context);
   if (hlo->opcode() == HloOpcode::kPad) {
     OperandIndexing pad_indexing_map =
         *operands_indexing.indexing_maps[0].begin();
@@ -1178,16 +1231,54 @@ std::vector<OperandIndexingSet> GetOperandIndexingMaps(
 
 }  // namespace
 
+// Computes symbolic tiles for all instructions in a fusion graph by
+// propagating mapping backward from the root to the parameters.
+//
+// 1. Initialize: Start a worklist with the "real root" instruction, which
+//    anchors the analysis to global tiling parameters (e.g., M, N, K).
+// 2. Propagate & Resolve: For each instruction, compose its mapping with
+//    operand-local indexing. This step automatically replaces hidden
+//    reduction symbols (like Dot contractions) by global tiling parameters.
+// 3. Deduplicate (CSE): Store tiled instructions in a unique set based on
+//    their HLO pointer and IndexingMap. Identical mappings are
+//    automatically merged, and new unique instructions are added to the
+//    worklist.
+// 4. Encapsulate Fusions: Process nested fusions recursively. They serve as
+//    index map boundary; nested fusion parameters are not re-tiled relative to
+//    the outer scope.
+// 5. Finalize: Sort the resulting graph in define-before-use order and
+//    aggregate all derived constraints into a single TilingSpecification.
+//
+// Eg:
+// nested_computation {
+//   p0 = f32[128] parameter(0)
+//   ROOT neg = f32[128] negate(p0)
+// }
+// fused_computation {
+//   p0 = f32[128] parameter(0)
+//   p1 = f32[128] parameter(1)
+//   %exp = f32[128] exp(p1)
+//   %a = f32[128] fusion(p0), kind=kLoop, calls=nested_computation
+//   ROOT add = f32[128] add(%a, %exp)
+// }
+//
+// 1. The analysis starts at 'add'.
+// 2. Encountering '%a' triggers a recursive AnalyzeNestedFusion call.
+// 3. '%a' is added to the worklist as a SymbolicTiledHloFusionInstruction,
+//    encapsulating its own internal analysis.
+// 4. %exp is added to the worklist as a SymbolicTiledHloInstruction.
+// 5. '%a' is popped, the loop hits a 'continue' to stop at the fusion boundary,
+//    since it was already analyzed as a nested fusion,
+// 6. %exp is popped, its operand is a parameter, so it maps to a fusion
+//    parameter, and we are done.
 /*static*/ SymbolicTileAnalysisOrError SymbolicTileAnalysis::AnalyzeFusionImpl(
     const HloFusionAdaptor& fusion,
     const TilingSpecification::ParameterMapping& parameter_mapping,
-    SymbolicExprContext* symbolic_expr_context,
-    const RootIndexing& root_indexing,
+    MLIRContext* mlir_context, const RootIndexing& root_indexing,
     IndexingMap::SimplifyPointDimensions simplification_mode,
     EmitterSpecificConstraintsBuilder emitter_specific_constraints_builder,
     std::vector<SymbolicTiledHloInstruction*> root_runtime_variables) {
-  OrderedUniquePtrValueHashSet<SymbolicTiledHloInstruction>
-      tiled_hlo_instructions_set;
+  UnsafeSymbolicTiledHloInstructionOrderedSet tiled_hlo_instructions_set;
 
   // TODO(b/372454662): Once we get rid of the restriction of only one real
   // root, this needs to be adapted.
@@ -1213,11 +1304,13 @@ std::vector<OperandIndexingSet> GetOperandIndexingMaps(
       continue;
     }
     if (tiled_hlo_instruction->hlo()->opcode() == HloOpcode::kFusion) {
-      continue;  // Don't analyze parameter operands of nested fusions.
+      // Don't analyze parameter operands of nested fusions.
+      // Check example in function docstring to see why this is needed.
+      continue;
     }
 
-    auto operands_indexing = GetOperandIndexingMaps(
-        tiled_hlo_instruction->hlo(), symbolic_expr_context);
+    auto operands_indexing =
+        GetOperandIndexingMaps(tiled_hlo_instruction->hlo(), mlir_context);
 
     HloInstructionAdaptor instruction_adaptor(*hlo, &fusion);
     for (auto [operand_pos, operand_and_indexing_map_set] : llvm::enumerate(
@@ -1250,7 +1343,7 @@ std::vector<OperandIndexingSet> GetOperandIndexingMaps(
             operand.instruction().fused_instructions_computation());
 
         auto analysis_or = SymbolicTileAnalysis::AnalyzeNestedFusion(
-            *nested_fusion_adaptor, parameter_mapping, symbolic_expr_context,
+            *nested_fusion_adaptor, parameter_mapping, mlir_context,
             composed_indexing.indexing_map, simplification_mode,
             emitter_specific_constraints_builder,
             composed_indexing.rt_operands);
@@ -1300,8 +1393,15 @@ std::vector<OperandIndexingSet> GetOperandIndexingMaps(
   // Create emitter-specific constraints if a builder was provided.
   std::unique_ptr<EmitterSpecificConstraints> emitter_specific_constraints;
   if (emitter_specific_constraints_builder != nullptr) {
+    absl::StatusOr<std::unique_ptr<EmitterSpecificConstraints>>
+        emitter_specific_constraints_applied =
+            emitter_specific_constraints_builder(tiled_hlo_instructions,
+                                                 fusion);
+    if (!emitter_specific_constraints_applied.ok()) {
+      return FusionDecision(emitter_specific_constraints_applied.status());
+    }
     emitter_specific_constraints =
-        emitter_specific_constraints_builder(tiled_hlo_instructions, fusion);
+        std::move(*emitter_specific_constraints_applied);
   }
 
   TilingSpecification tiling_specification = TilingSpecification(
@@ -1311,11 +1411,11 @@ std::vector<OperandIndexingSet> GetOperandIndexingMaps(
   return SymbolicTileAnalysis(std::move(tiled_hlo_instructions), root_indexing,
                               std::move(tiling_specification),
                               std::move(emitter_specific_constraints),
-                              symbolic_expr_context);
+                              mlir_context);
 }
 
 /*static*/ SymbolicTileAnalysisOrError SymbolicTileAnalysis::AnalyzeFusion(
-    const HloFusionAdaptor& fusion, SymbolicExprContext* symbolic_expr_context,
+    const HloFusionAdaptor& fusion, MLIRContext* mlir_context,
     EmitterSpecificConstraintsBuilder emitter_specific_constraints_builder) {
   auto real_root_index_or = GetRealRootIndex(fusion.GetRoots());
   if (!real_root_index_or.ok()) {
@@ -1329,7 +1429,7 @@ std::vector<OperandIndexingSet> GetOperandIndexingMaps(
   }
 
   auto root_indexing_or =
-      GetRootIndexing(fusion, *parameter_mapping_or, symbolic_expr_context);
+      GetRootIndexing(fusion, *parameter_mapping_or, mlir_context);
   if (!root_indexing_or.ok()) {
     return FusionDecision(root_indexing_or.status());
   }
@@ -1339,7 +1439,7 @@ std::vector<OperandIndexingSet> GetOperandIndexingMaps(
           : IndexingMap::SimplifyPointDimensions::kPreserve;
 
   return AnalyzeFusionImpl(fusion, std::move(*parameter_mapping_or),
-                           symbolic_expr_context, std::move(*root_indexing_or),
+                           mlir_context, std::move(*root_indexing_or),
                            simplification_mode,
                            emitter_specific_constraints_builder,
                            /*root_runtime_variables=*/{});
@@ -1404,10 +1504,10 @@ namespace {
 // the buffer sharing logic is adapted.
 // This method assumes that `output` has tile_offset_indexing computed, and
 // returns a FailedPrecondition error if not.
-absl::StatusOr<bool> IsSafeForBufferSharing(
-    const TiledHloInstruction& output, int64_t reference_num_output_tiles,
-    const TiledHloSchedule& schedule,
-    SymbolicExprContext* symbolic_expr_context) {
+absl::StatusOr<bool> IsSafeForBufferSharing(const TiledHloInstruction& output,
+                                            int64_t reference_num_output_tiles,
+                                            const TiledHloSchedule& schedule,
+                                            MLIRContext* mlir_context) {
   // TODO(b/453611980): this function can not behave well with regards to
   // schedules other than the default major-to-minor. This is because
   // non-trivial schedules require understanding the semantics of the iteration
@@ -1438,7 +1538,7 @@ absl::StatusOr<bool> IsSafeForBufferSharing(
   // iteration order on output tile sizes and a tile stride of 1, which means
   // that we can take the identity map.
   auto identity_indexing_map =
-      CreateIdentityMap(output.hlo()->shape(), symbolic_expr_context);
+      CreateIdentityMap(output.hlo()->shape(), mlir_context);
   auto iota = llvm::seq<int64_t>(0, output.hlo()->shape().dimensions().size());
   std::vector<int64_t> major_to_minor_active_tiling_parameters(iota.begin(),
                                                                iota.end());
@@ -1446,7 +1546,7 @@ absl::StatusOr<bool> IsSafeForBufferSharing(
       auto tiling_info,
       ComputeOutputTilingInfo(identity_indexing_map, output.tile_sizes(),
                               major_to_minor_active_tiling_parameters, schedule,
-                              symbolic_expr_context));
+                              mlir_context));
 
   // Check whether the tile_offsets_indexing expression is the same as one
   // computed directly for this root.
@@ -1467,7 +1567,7 @@ absl::StatusOr<std::vector<const TiledHloInstruction*>> InitializeTiledRoots(
         tiled_hlo_instructions,
     const TiledHloSchedule& schedule,
     absl::Span<const int64_t> num_output_tiles_per_dim,
-    SymbolicExprContext* symbolic_expr_context) {
+    MLIRContext* mlir_context) {
   // TODO(b/390559452): Investigate whether it is faster to use linear lookup.
   absl::flat_hash_map<const HloInstruction*, int64_t> roots_to_output_index;
   roots_to_output_index.reserve(roots.size());
@@ -1498,7 +1598,7 @@ absl::StatusOr<std::vector<const TiledHloInstruction*>> InitializeTiledRoots(
         bool valid, IsSafeForBufferSharing(*tiled_hlo_instr,
                                            /*reference_num_output_tiles=*/
                                            Product(num_output_tiles_per_dim),
-                                           schedule, symbolic_expr_context));
+                                           schedule, mlir_context));
     if (!valid) {
       continue;
     }
@@ -1544,7 +1644,7 @@ absl::StatusOr<TiledHloComputation> ComputeTiledHloInstructionsImpl(
     bool compute_all_tile_offset_indexing_maps,
     const std::optional<absl::Span<const Interval>>&
         parent_output_tile_dim_bounds,
-    SymbolicExprContext* symbolic_expr_context,
+    MLIRContext* mlir_context,
     absl::flat_hash_map<const SymbolicTiledHloInstruction*,
                         TiledHloInstruction*>
         symbolic_to_tiled_hlo_map) {
@@ -1628,7 +1728,7 @@ absl::StatusOr<TiledHloComputation> ComputeTiledHloInstructionsImpl(
       OutputTilingInfo output_tiling_info,
       ComputeOutputTilingInfo(real_root_indexing, flat_tiling_parameters,
                               major_to_minor_active_tiling_parameters,
-                              tiled_hlo_schedule, symbolic_expr_context,
+                              tiled_hlo_schedule, mlir_context,
                               parent_output_tile_dim_bounds));
 
   VLOG(3) << "output_tiling_info: " << output_tiling_info.ToString("; ");
@@ -1670,7 +1770,7 @@ absl::StatusOr<TiledHloComputation> ComputeTiledHloInstructionsImpl(
           ComputeTileOffsetIndexing(
               *symbolic_tiled_hlo,
               output_tiling_info.linear_output_tile_offset_indexing,
-              symbolic_expr_context));
+              mlir_context));
       runtime_variables = MapToTiledInstructions(
           symbolic_tiled_hlo->runtime_variables(), symbolic_to_tiled_hlo_map);
       // Symbols here can only be runtime variables.
@@ -1700,7 +1800,7 @@ absl::StatusOr<TiledHloComputation> ComputeTiledHloInstructionsImpl(
               symbolic_fusion_tiling->analysis_, flat_tiling_parameters,
               tiled_hlo_schedule, major_to_minor_active_tiling_parameters,
               compute_all_tile_offset_indexing_maps, fusion_tile_dim_bounds,
-              symbolic_expr_context, symbolic_to_tiled_hlo_map));
+              mlir_context, symbolic_to_tiled_hlo_map));
 
       TF_ASSIGN_OR_RETURN(
           tiled_instruction,
@@ -1729,7 +1829,7 @@ absl::StatusOr<TiledHloComputation> ComputeTiledHloInstructionsImpl(
       auto tiled_roots,
       InitializeTiledRoots(
           analysis.GetRoots(), tiled_hlo_instructions, tiled_hlo_schedule,
-          output_tiling_info.num_output_tiles_per_dim, symbolic_expr_context));
+          output_tiling_info.num_output_tiles_per_dim, mlir_context));
   return TiledHloComputation::FromSortedTiledHloInstructions(
       std::move(tiled_hlo_instructions), tiled_roots,
       output_tiling_info.num_output_tiles_per_dim);
@@ -1764,7 +1864,7 @@ SymbolicTileAnalysis::ComputeTiledHloInstructions(
       *this, flat_tiling_parameters, *tiled_hlo_schedule,
       /*major_to_minor_active_tiling_parameters=*/{},
       compute_all_tile_offset_indexing_maps,
-      /*parent_output_tile_dim_bounds=*/std::nullopt, symbolic_expr_context_,
+      /*parent_output_tile_dim_bounds=*/std::nullopt, mlir_context_,
       /*symbolic_to_tiled_hlo_map=*/{});
 }
 

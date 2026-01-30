@@ -20,7 +20,6 @@ limitations under the License.
 #define XLA_HLO_IR_HLO_SHARDING_H_
 
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -144,11 +143,6 @@ class HloSharding {
         subgroup_types, metadata);
   }
 
-  // Creates a new sharding which splits a one-dimensional input shape into
-  // `num_tiles` tiles.
-  static HloSharding Tile1D(const Shape& input_shape, int64_t num_tiles,
-                            absl::Span<const OpMetadata> metadata = {});
-
   // Creates a new sharding for a tuple type. The given ShapeTree must have
   // elements for every leaf shape contained in the tuple.
   static HloSharding Tuple(const ShapeTree<HloSharding>& sub_shardings);
@@ -179,6 +173,9 @@ class HloSharding {
   // Checks whether device is a reserved device number. A reserved device number
   // has usually a special meaning, with dedicated handling logic.
   static bool IsReservedDevice(int64_t device) { return device < 0; }
+
+  // Convert NamedSharding (HloShardingV3) to HloShardingV2.
+  static HloSharding V3ToV2Sharding(const NamedSharding& named_sharding);
 
   OpSharding ToProto() const;
 
@@ -246,9 +243,7 @@ class HloSharding {
   bool IsManualLeaf() const {
     DCHECK(!IsTuple());
     if (UseNamedShardingLeaf()) {
-      // ManualSharding is represented by separate ManualComputationOp in named
-      // sharding format.
-      return false;
+      return named_sharding_->IsManual();
     }
     return manual_;
   }
@@ -272,13 +267,16 @@ class HloSharding {
 
   bool IsUnreduced() const {
     if (!IsTuple()) {
-      return unreduced_;
+      return IsUnreducedLeaf();
     }
     return absl::c_all_of(tuple_elements_,
                           [](const HloSharding& s) { return s.IsUnreduced(); });
   }
   bool IsUnreducedLeaf() const {
     DCHECK(!IsTuple());
+    if (UseNamedShardingLeaf()) {
+      return named_sharding_->IsUnreduced();
+    }
     return unreduced_;
   }
 
@@ -370,29 +368,20 @@ class HloSharding {
   // Returns true if the sharding defines an operation on the given device.
   bool UsesDevice(int64_t device) const;
 
-  // Retrieves a histogram of the devices used by the sharding. The returned
-  // map has the device number as key, and the occurrence count as value.
-  // If a sharding does not have a device, it will not be included in the
-  // histogram. The count argument, if not nullptr, will receive the total
-  // number of elements this sharding is made of (one for array, N leaves for
-  // tuples).
-  std::map<int64_t, int64_t> UsedDevices(int64_t* count) const;
+  // Returns the device assignment for the sharding.
+  //
+  // For NamedSharding we convert it to tile based HloShardingV2 and then return
+  // the device assignment.
+  TileAssignment device_assignment() const {
+    if (UseNamedShardingLeaf()) {
+      return V3ToV2Sharding(*named_sharding_).device_assignment();
+    }
+    return tile_assignment_;
+  }
 
   // Returns the tile that should be executed on the given device.
   // REQUIRES: !IsTuple()
   std::vector<int64_t> TileIndexForDevice(int64_t device) const;
-
-  // Returns the device that should execute the given tile.
-  // It is an error to call this if is_replicated() is true.
-  // When ReplicateOnLastTileDim() == true, if index.size() == data rank, it
-  // returns the first device in that replicated subgroup; otherwise,
-  // index.size() should be the same as tile_assignment()'s rank and specifies
-  // the member of the replication subgroup.
-  // REQUIRES: !IsTuple()
-  // REQUIRES: !IsManual()
-  // REQUIRES: !IsUnknown()
-  // REQUIRES: !maximal_
-  int64_t DeviceForTileIndex(absl::Span<const int64_t> index) const;
 
   // Given a device ID, returns the offset within the specified shape of the
   // tile that should be executed on the given core. This returns the lower
@@ -412,6 +401,14 @@ class HloSharding {
   std::vector<int64_t> TileLimitForDevice(const Shape& shape,
                                           int64_t device) const;
 
+  // Invokes a callback with the (tile_index, device_id) for each tile in the
+  // sharding.
+  //
+  // For NamedSharding we convert it to tile based HloShardingV2 and then invoke
+  // callback on the tile based sharding.
+  void EachTile(
+      absl::FunctionRef<void(absl::Span<const int64_t>, int64_t)> f) const;
+
   // Invokes a callback with the (device_index, tile_offset, tile_limit) for
   // each tile in the sharding. tile_offset is the offset within the specified
   // shape dims of the tile that should be executed on device_index, tile_limit
@@ -420,6 +417,9 @@ class HloSharding {
   // REQUIRES: !IsManual()
   // REQUIRES: !IsUnknown()
   // REQUIRES: !maximal_
+  //
+  // For NamedSharding we convert it to tile based HloShardingV2 and then invoke
+  // callback on the tile based sharding.
   absl::Status EachTile(
       absl::Span<const int64_t> dims,
       absl::FunctionRef<void(int64_t, absl::Span<const int64_t>,
@@ -508,6 +508,43 @@ class HloSharding {
   // REQUIRES: !IsReplicated() && !IsTuple()
   const TileAssignment& tile_assignment() const { return tile_assignment_; }
 
+  const NamedSharding& named_sharding() const {
+    CHECK(UseNamedShardingLeaf());
+    return named_sharding_.value();
+  }
+
+  // Returns the number of dimensions.
+  int64_t num_dimensions() const {
+    if (UseNamedShardingLeaf()) {
+      return named_sharding_->num_dimensions();
+    }
+    return tile_assignment().num_dimensions();
+  }
+
+  // Returns number of shards in the given dimension.
+  int64_t dimension(int64_t dim_index) const {
+    if (UseNamedShardingLeaf()) {
+      return named_sharding_->dimension(dim_index);
+    }
+    return tile_assignment().dim(dim_index);
+  }
+
+  // Returns all sharding dimensions.
+  absl::Span<const int64_t> dimensions() const {
+    if (UseNamedShardingLeaf()) {
+      return named_sharding_->dimensions();
+    }
+    return tile_assignment().dimensions();
+  }
+
+  // Returns the total number of devices used by sharding.
+  int64_t num_devices() const {
+    if (UseNamedShardingLeaf()) {
+      return named_sharding_->num_devices();
+    }
+    return tile_assignment().num_elements();
+  }
+
   // Gets the subgroup types array.
   // REQUIRES: !IsTuple()
   const std::vector<OpSharding::Type>& subgroup_types() const {
@@ -533,9 +570,8 @@ class HloSharding {
   // Gets the total number of tiles including subgroups and partial replication.
   int64_t TotalNumTiles() const;
   // Gets the number of tiles. If it has partial replication, this will not
-  // equal the device count.
+  // equal the device count. This method is not defined for tuple shardings.
   int64_t NumTiles() const;
-  int64_t NumTilesLeaf() const;
   // Like NumTiles() but considers only some specific dimensions passed as
   // argument
   int64_t NumTiles(absl::Span<const int64_t> dims) const;
@@ -551,7 +587,7 @@ class HloSharding {
       return (it - subgroup_types_.begin()) + TiledDataRank();
     }
     if (replicate_on_last_tile_dim_) {
-      return tile_assignment_.num_dimensions() - 1;
+      return num_dimensions() - 1;
     }
     return -1;
   }
@@ -575,19 +611,10 @@ class HloSharding {
   }
 
   // Returns the data rank for tiled sharding. It doesn't include subgroup dims.
+  // This method is not defined for tuple shardings.
   int64_t TiledDataRank() const {
-    CHECK(IsTiled());
-    int64_t rank = tile_assignment_.num_dimensions();
-    if (ReplicateOnLastTileDim()) {
-      rank--;
-    }
-    rank -= subgroup_types_.size();
-    return rank;
-  }
-  int64_t TiledDataRankLeaf() const {
-    DCHECK(!IsTuple());
     CHECK(IsTiledLeaf());
-    int64_t rank = tile_assignment_.num_dimensions();
+    int64_t rank = num_dimensions();
     if (ReplicateOnLastTileDim()) {
       rank--;
     }
@@ -667,6 +694,16 @@ class HloSharding {
 
   const ShardGroup& GetShardGroup() const { return shard_group_; }
 
+  explicit HloSharding(NamedSharding named_sharding)
+      : replicated_(false),
+        maximal_(false),
+        tuple_(false),
+        manual_(false),
+        unknown_(false),
+        unreduced_(false),
+        replicate_on_last_tile_dim_(false),
+        named_sharding_(std::move(named_sharding)) {}
+
  private:
   explicit HloSharding(bool manual, bool replicated, bool unknown,
                        bool unreduced, absl::Span<const OpMetadata> metadata)
@@ -733,15 +770,6 @@ class HloSharding {
         unreduced_(false),
         replicate_on_last_tile_dim_(false),
         named_sharding_(std::nullopt) {}
-  explicit HloSharding(NamedSharding named_sharding)
-      : replicated_(false),
-        maximal_(false),
-        tuple_(false),
-        manual_(false),
-        unknown_(false),
-        unreduced_(false),
-        replicate_on_last_tile_dim_(false),
-        named_sharding_(std::move(named_sharding)) {}
 
   // Test-only constructor for sharding format code coverage. Copies the
   // original sharding with provided tile assignment.

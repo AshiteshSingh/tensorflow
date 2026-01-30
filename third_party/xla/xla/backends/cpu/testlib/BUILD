@@ -24,6 +24,7 @@ cc_library(
     hdrs = ["kernel_runner.h"],
     deps = [
         "//xla:xla_proto_cc",
+        "//xla/backends/cpu:target_machine_options",
         "//xla/backends/cpu/codegen:builtin_definition_generator",
         "//xla/backends/cpu/codegen:cpu_features",
         "//xla/backends/cpu/codegen:execution_engine",
@@ -41,6 +42,7 @@ cc_library(
         "//xla/codegen/testlib:kernel_runner",
         "//xla/runtime:work_group",
         "//xla/service:hlo_module_config",
+        "//xla/service/cpu:cpu_compiler",
         "//xla/service/cpu:cpu_options",
         "//xla/service/llvm_ir:llvm_util",
         "//xla/tsl/platform:errors",
@@ -88,6 +90,7 @@ cc_library(
     srcs = ["llvm_ir_kernel_emitter.cc"],
     hdrs = ["llvm_ir_kernel_emitter.h"],
     deps = [
+        "//xla:shape_util",
         "//xla:util",
         "//xla/codegen:kernel_definition",
         "//xla/codegen:kernel_emitter",
@@ -96,6 +99,7 @@ cc_library(
         "//xla/runtime:buffer_use",
         "//xla/runtime:work_group",
         "//xla/service:buffer_assignment",
+        "//xla/service:shaped_slice",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
         "@com_google_absl//absl/types:span",
@@ -110,6 +114,7 @@ cc_library(
     srcs = ["mlir_kernel_emitter.cc"],
     hdrs = ["mlir_kernel_emitter.h"],
     deps = [
+        "//xla:shape_util",
         "//xla/backends/cpu/codegen:fusion_compiler",
         "//xla/codegen:kernel_definition",
         "//xla/codegen:kernel_emitter",
@@ -118,6 +123,7 @@ cc_library(
         "//xla/runtime:buffer_use",
         "//xla/runtime:work_group",
         "//xla/service:buffer_assignment",
+        "//xla/service:shaped_slice",
         "//xla/tsl/platform:statusor",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings:string_view",
@@ -157,7 +163,6 @@ tsl_pybind_extension(
         "//xla/codegen:llvm_kernel_source",
         "//xla/codegen:mlir_kernel_source",
         "//xla/codegen/testlib:kernel_runner",
-        "//xla/hlo/analysis:symbolic_expr",
         "//xla/hlo/ir:hlo",
         "//xla/runtime:work_group",
         "//xla/service:buffer_assignment",
@@ -190,7 +195,6 @@ xla_cc_test(
         "//xla/codegen:llvm_kernel_source",
         "//xla/runtime:buffer_use",
         "//xla/service:buffer_assignment",
-        "//xla/stream_executor:launch_dim",
         "//xla/tsl/platform:statusor",
         "//xla/tsl/platform:test",
         "//xla/tsl/platform:test_main",
@@ -198,7 +202,6 @@ xla_cc_test(
         "@com_google_googletest//:gtest",
         "@llvm-project//llvm:JITLink",
         "@llvm-project//llvm:ir_headers",
-        "@local_tsl//tsl/platform:casts",
     ],
 )
 

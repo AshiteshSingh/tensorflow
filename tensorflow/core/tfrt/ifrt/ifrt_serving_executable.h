@@ -21,6 +21,7 @@ limitations under the License.
 #include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -43,8 +44,10 @@ limitations under the License.
 #include "xla/python/ifrt/device.h"
 #include "xla/python/ifrt/device_list.h"
 #include "xla/python/ifrt/executable.h"
+#include "xla/python/ifrt/layout.h"
 #include "xla/python/ifrt/shape.h"
 #include "xla/python/ifrt/sharding.h"
+#include "xla/shape.h"
 #include "xla/tsl/concurrency/future.h"
 #include "xla/tsl/concurrency/ref_count.h"
 #include "xla/tsl/platform/threadpool.h"
@@ -129,6 +132,15 @@ class IfrtServingExecutable {
   };
 
   struct CachedExecutableBundle {
+    // If populated, these are the input shapes and layouts that the
+    // executable was compiled with. `xla_input_shapes` and `xla_input_layouts`
+    // are either both populated or both empty and they will have the same size.
+    // The index `i` in these vectors corresponds to the i-th argument in the
+    // executable.
+    // TODO(b/477700609): Currently `xla_input_layouts` and `xla_input_shapes`
+    // are not used. We should use them to generate ifrt arrays.
+    std::optional<std::vector<xla::Shape>> xla_input_shapes;
+    std::optional<std::vector<xla::ifrt::LayoutRef>> xla_input_layouts;
     xla::ifrt::LoadedExecutableRef ifrt_executable;
     tensorflow::tpu::TPUCompileMetadataProto compile_metadata;
     std::vector<std::unique_ptr<TfHostCallback>> host_callbacks;
@@ -230,10 +242,9 @@ class IfrtServingExecutable {
       const CachedExecutableBundle& executable_bundle,
       const xla::ifrt::DeviceListRef& devices);
 
-  tsl::Future<SharedCachedExecutableBundle> LookUpOrCreateExecutable(
-      const tensorflow::tpu::TPUCompileMetadataProto& compile_metadata,
-      absl::Span<const DtypeAndShape> dtypes_and_shapes,
-      absl::Span<const int> variable_arg_indices);
+  absl::StatusOr<tsl::Future<SharedCachedExecutableBundle>>
+  LookUpOrCreateExecutable(absl::Span<const DtypeAndShape> dtypes_and_shapes,
+                           absl::Span<const int> variable_arg_indices);
   absl::StatusOr<IfrtServingExecutable::SharedCachedExecutableBundle>
   CreateExecutableSynchronously(
       mlir::OwningOpRef<mlir::ModuleOp> module_copy,
@@ -248,8 +259,7 @@ class IfrtServingExecutable {
   std::vector<xla::ifrt::Shape> GetArgShape(
       int arg_index, const CachedExecutableBundle& entry);
 
-  bool UsePortableExecution(
-      const tensorflow::tpu::TPUCompileMetadataProto& compile_metadata);
+  bool UsePortableExecution();
 };
 
 }  // namespace ifrt_serving

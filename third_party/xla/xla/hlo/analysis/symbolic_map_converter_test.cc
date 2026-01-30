@@ -53,6 +53,7 @@ AffineMap ParseAffineMap(absl::string_view serialized_affine_map,
 
 class SymbolicMapConverterTest : public ::testing::Test {
  public:
+  SymbolicMapConverterTest() { RegisterSymbolicExprStorage(&context_); }
   MLIRContext context_;
 };
 
@@ -85,8 +86,8 @@ TEST_F(SymbolicMapConverterTest, SymbolicToAffineNestedFailure) {
   SymbolicExpr c1 = CreateSymbolicConstant(1, &context_);
   SymbolicExpr c2 = CreateSymbolicConstant(2, &context_);
 
-  // d0 + max(c1, c2). max is not representable in AffineExpr.
-  SymbolicExpr nested_max_expr = d0 + c1.max(c2);
+  // max(d0, c2) + c1. max is not representable in AffineExpr.
+  SymbolicExpr nested_max_expr = d0.max(c2) + c1;
 
   // This should not crash and should return a null AffineMap.
   AffineMap affine_map = SymbolicMapToAffineMap(

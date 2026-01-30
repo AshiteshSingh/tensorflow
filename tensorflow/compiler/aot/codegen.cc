@@ -670,22 +670,16 @@ absl::Status ExtendRewrites(
         " is outside the range of temp sizes: [0,", buffer_infos_size, ")"));
   }
 
-  const bool xla_cpu_multi_thread_eigen =
-      xla::GetDebugOptionsFromFlags().xla_cpu_multi_thread_eigen();
-
   std::vector<std::string> runtime_specific_includes = {R"(
 #include "absl/log/check.h"
+#include "absl/synchronization/blocking_counter.h"
 #include "xla/backends/cpu/runtime/kernel_c_api.h"
 #include "xla/types.h")"};
 
   if (HasThunkKind(aot_thunks->proto().thunk_sequence(),
                    xla::cpu::ThunkProto::kDotThunk)) {
-    if (xla_cpu_multi_thread_eigen) {
-      runtime_specific_includes.push_back(
-          R"(#include "xla/service/cpu/runtime_matmul.h")");
-    }
     runtime_specific_includes.push_back(
-        R"(#include "xla/service/cpu/runtime_single_threaded_matmul.h")");
+        R"(#include "xla/backends/cpu/runtime/dot_lib.h")");
   }
 
   if (HasThunkKind(aot_thunks->proto().thunk_sequence(),
@@ -1212,9 +1206,8 @@ absl::StatusOr<EmbeddedConstantBuffers> GenerateConstantBuffersData(
       auto aot_thunk_result_temp,
       xla::cpu::CpuAotCompilationResult::FromString(serialized, nullptr));
 
-  TF_ASSIGN_OR_RETURN(
-      auto executable,
-      std::move(*aot_thunk_result_temp).LoadExecutable(nullptr, nullptr));
+  TF_ASSIGN_OR_RETURN(auto executable,
+                      std::move(*aot_thunk_result_temp).LoadExecutable());
 
   xla::cpu::CpuExecutable* cpu_executable =
       tsl::down_cast<xla::cpu::CpuExecutable*>(executable.get());
@@ -1223,9 +1216,9 @@ absl::StatusOr<EmbeddedConstantBuffers> GenerateConstantBuffersData(
 
   int constant_identifier = 0;
   for (const auto& constant : cpu_executable->constants()) {
-    const uint8_t* constant_data_bytes_ptr = reinterpret_cast<const uint8_t*>(
-        constant.AsDeviceMemoryBase().opaque());
-    const size_t constant_size = constant.AsDeviceMemoryBase().size();
+    const uint8_t* constant_data_bytes_ptr =
+        reinterpret_cast<const uint8_t*>(constant.AsDeviceAddress().opaque());
+    const size_t constant_size = constant.AsDeviceAddress().size();
 
     // NOTE(basioli): Some constants are empty, we don't need to embed them
     if (constant_size == 0) {

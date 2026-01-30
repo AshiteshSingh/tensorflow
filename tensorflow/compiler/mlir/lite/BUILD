@@ -736,7 +736,7 @@ cc_library(
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
-        "@local_tsl//tsl/platform:statusor",
+        "@tsl//tsl/platform:statusor",
     ],
 )
 
@@ -848,7 +848,7 @@ tf_cc_test(
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
         "@com_google_absl//absl/status",
-        "@local_tsl//tsl/platform:status",
+        "@tsl//tsl/platform:status",
     ],
 )
 
@@ -1183,10 +1183,10 @@ cc_library(
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TransformUtils",
         "@llvm-project//mlir:Transforms",
-        "@local_xla//xla/mlir_hlo",
-        "@local_xla//xla/mlir_hlo:type_conversion",
-        "@local_xla//xla/mlir_hlo:unfuse_batch_norm",
         "@stablehlo//:stablehlo_ops",
+        "@xla//xla/mlir_hlo",
+        "@xla//xla/mlir_hlo:type_conversion",
+        "@xla//xla/mlir_hlo:unfuse_batch_norm",
     ],
 )
 
@@ -1422,8 +1422,8 @@ cc_library(
         "@llvm-project//mlir:QuantOps",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TransformUtils",
-        "@local_xla//xla/mlir_hlo",
         "@stablehlo//:stablehlo_ops",
+        "@xla//xla/mlir_hlo",
     ],
 )
 
@@ -1570,10 +1570,10 @@ cc_library(
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TransformUtils",
-        "@local_tsl//tsl/platform:status",
         "@stablehlo//:stablehlo_ops",
         "@stablehlo//:vhlo_ops",
         "@stablehlo//:vhlo_types",
+        "@tsl//tsl/platform:status",
     ],
 )
 
@@ -1643,8 +1643,12 @@ cc_library(
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/functional:function_ref",
         "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@flatbuffers",
@@ -1654,10 +1658,9 @@ cc_library(
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:QuantOps",
         "@llvm-project//mlir:Support",
-        "@local_tsl//tsl/platform:fingerprint",
-        "@local_tsl//tsl/platform:tstring",
         "@stablehlo//:stablehlo_ops",
         "@stablehlo//:vhlo_ops",
+        "@tsl//tsl/platform:tstring",
     ],
 )
 
@@ -1699,6 +1702,7 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -1713,11 +1717,10 @@ cc_library(
         "@llvm-project//mlir:ReconcileUnrealizedCasts",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TranslateLib",
-        "@local_xla//xla/tsl/platform:errors",
-        "@local_xla//xla/tsl/platform:status",
-        "@local_xla//xla/tsl/platform:statusor",
         "@stablehlo//:stablehlo_ops",
         "@stablehlo//:vhlo_ops",
+        "@xla//xla/tsl/platform:errors",
+        "@xla//xla/tsl/platform:statusor",
     ],
 )
 
@@ -1770,7 +1773,6 @@ tf_cc_test(
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:ArithDialect",
         "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:TransformUtils",
         "@stablehlo//:stablehlo_ops",
     ],
 )
@@ -1808,8 +1810,12 @@ cc_library(
         "//tensorflow/compiler/mlir:op_or_arg_name_mapper",
         "//tensorflow/compiler/mlir/lite/schema:schema_fbs",
         "//tensorflow/core:protos_all_cc",
+        "@com_google_absl//absl/functional:any_invocable",
+        "@com_google_absl//absl/functional:function_ref",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
     ],
@@ -1915,10 +1921,10 @@ tf_cc_binary(
         "@llvm-project//mlir:Parser",
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Support",
-        "@local_xla//xla/hlo/translate/hlo_to_mhlo:translate",
-        "@local_xla//xla/mlir_hlo",
         "@stablehlo//:chlo_ops",
         "@stablehlo//:stablehlo_ops",
+        "@xla//xla/hlo/translate/hlo_to_mhlo:translate",
+        "@xla//xla/mlir_hlo",
     ],
 )
 
@@ -1969,9 +1975,9 @@ cc_library(
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Support",
         "@llvm-project//mlir:Transforms",
-        "@local_xla//xla/mlir_hlo:mhlo_passes",
-        "@local_xla//xla/mlir_hlo:stablehlo_extension_passes",
         "@stablehlo//:stablehlo_passes",
+        "@xla//xla/mlir_hlo:mhlo_passes",
+        "@xla//xla/mlir_hlo:stablehlo_extension_passes",
     ],
 )
 
@@ -2039,9 +2045,9 @@ cc_library(
         "@llvm-project//mlir:QuantOps",
         "@llvm-project//mlir:ReconcileUnrealizedCasts",
         "@llvm-project//mlir:Support",
-        "@local_tsl//tsl/platform:protobuf",
         "@stablehlo//:stablehlo_ops",
         "@stablehlo//:vhlo_ops",
+        "@tsl//tsl/platform:protobuf",
     ],
 )
 
@@ -2073,7 +2079,7 @@ cc_library(
         "@llvm-project//mlir:IR",
         "@llvm-project//mlir:QuantOps",
         "@llvm-project//mlir:Support",
-        "@local_tsl//tsl/platform:statusor",
+        "@tsl//tsl/platform:statusor",
     ],
 )
 

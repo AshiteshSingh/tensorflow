@@ -51,12 +51,12 @@ limitations under the License.
 #include "xla/hlo/parser/hlo_parser.h"
 #include "xla/layout_util.h"
 #include "xla/primitive_util.h"
+#include "xla/runtime/device_id.h"
 #include "xla/service/collective_ops_utils.h"
 #include "xla/service/computation_placer.h"
 #include "xla/service/cpu/cpu_executable_run_options.h"
-#include "xla/service/global_device_id.h"
 #include "xla/shape_util.h"
-#include "xla/stream_executor/device_memory.h"
+#include "xla/stream_executor/device_address.h"
 #include "xla/stream_executor/stream_executor.h"
 #include "xla/tsl/concurrency/async_value_ref.h"
 #include "xla/tsl/platform/errors.h"
@@ -156,10 +156,6 @@ extern const char* const kCollectivePermuteSymbolName =
 extern const char* const kPartitionIdSymbolName =
     "__xla_cpu_runtime_PartitionId";
 extern const char* const kReplicaIdSymbolName = "__xla_cpu_runtime_ReplicaId";
-extern const char* const kOneDnnMatMulSymbolName =
-    "__xla_cpu_runtime_OneDnnMatMul";
-extern const char* const kOneDnnMatMulReorderSymbolName =
-    "__xla_cpu_runtime_OneDnnMatMulReorder";
 extern const char* const kHandleFfiCallSymbolName =
     "__xla_cpu_runtime_HandleFfiCall";
 

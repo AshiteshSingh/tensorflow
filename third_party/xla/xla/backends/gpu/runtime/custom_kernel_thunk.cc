@@ -16,6 +16,7 @@ limitations under the License.
 #include "xla/backends/gpu/runtime/custom_kernel_thunk.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -23,16 +24,18 @@ limitations under the License.
 #include "absl/container/inlined_vector.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/types/span.h"
 #include "xla/backends/gpu/runtime/print_buffer_contents.h"
 #include "xla/backends/gpu/runtime/thunk.h"
+#include "xla/backends/gpu/runtime/thunk.pb.h"
 #include "xla/codegen/emitters/kernel_arguments.h"
 #include "xla/runtime/buffer_use.h"
 #include "xla/service/buffer_assignment.h"
 #include "xla/service/gpu/kernels/custom_kernel.h"
-#include "xla/stream_executor/device_memory.h"
+#include "xla/stream_executor/device_address.h"
 #include "xla/stream_executor/kernel.h"
 #include "xla/stream_executor/kernel_args.h"
 #include "xla/stream_executor/stream.h"
@@ -81,9 +84,10 @@ absl::Status CustomKernelThunk::ExecuteOnStream(const ExecuteParams& params) {
           << custom_kernel_.ToString() << " as device kernel "
           << kernel->name();
 
-  absl::InlinedVector<se::DeviceMemoryBase, 4> buffer_args;
+  absl::InlinedVector<se::DeviceAddressBase, 4> buffer_args;
   for (const BufferAllocation::Slice& arg : args_) {
-    se::DeviceMemoryBase buf = params.buffer_allocations->GetDeviceAddress(arg);
+    se::DeviceAddressBase buf =
+        params.buffer_allocations->GetDeviceAddress(arg);
     VLOG(3) << "[" << device_ordinal << "]  Arg: alloc #" << arg.index()
             << ", offset: " << arg.offset() << ": " << buf.opaque() << " ("
             << buf.size() << "B)";
@@ -91,15 +95,15 @@ absl::Status CustomKernelThunk::ExecuteOnStream(const ExecuteParams& params) {
   }
 
   if (VLOG_IS_ON(100)) {
-    absl::InlinedVector<se::KernelArgument, 4> kernel_args;
-    for (const se::DeviceMemoryBase& arg : buffer_args) {
+    absl::InlinedVector<se::KernelArg, 4> kernel_args;
+    for (const se::DeviceAddressBase& arg : buffer_args) {
       kernel_args.push_back(arg);
     }
     PrintBufferContents(params.stream, kernel_args);
   }
 
-  se::KernelArgsDeviceMemoryArray args(buffer_args,
-                                       custom_kernel_.shared_memory_bytes());
+  stream_executor::KernelArgsDeviceAddressArray args(
+      buffer_args, custom_kernel_.shared_memory_bytes());
 
   return kernel->Launch(custom_kernel_.thread_dims(),
                         custom_kernel_.block_dims(),
@@ -119,6 +123,54 @@ Thunk::BufferUses CustomKernelThunk::buffer_uses() const {
     }
   }
   return buffers;
+}
+
+CustomKernelThunk::CustomKernelThunk(Thunk::ThunkInfo thunk_info,
+                                     CustomKernel custom_kernel,
+                                     std::vector<BufferAllocation::Slice> args,
+                                     std::vector<bool> written)
+    : Thunk(Kind::kCustomKernel, std::move(thunk_info)),
+      args_(std::move(args)),
+      written_(std::move(written)),
+      custom_kernel_(std::move(custom_kernel)) {}
+
+absl::StatusOr<ThunkProto> CustomKernelThunk::ToProto() const {
+  ThunkProto thunk_proto;
+  *thunk_proto.mutable_thunk_info() = thunk_info().ToProto();
+
+  CustomKernelThunkProto* custom_kernel_thunk_proto =
+      thunk_proto.mutable_custom_kernel_thunk();
+  for (const BufferAllocation::Slice& arg : args_) {
+    TF_ASSIGN_OR_RETURN(*custom_kernel_thunk_proto->add_args(), arg.ToProto());
+  }
+  for (bool written : written_) {
+    custom_kernel_thunk_proto->add_written(written);
+  }
+  TF_ASSIGN_OR_RETURN(*custom_kernel_thunk_proto->mutable_custom_kernel(),
+                      custom_kernel_.ToProto());
+  return thunk_proto;
+}
+
+absl::StatusOr<std::unique_ptr<CustomKernelThunk>> CustomKernelThunk::FromProto(
+    ThunkInfo thunk_info, const CustomKernelThunkProto& proto,
+    absl::Span<const BufferAllocation> buffer_allocations,
+    const std::optional<se::KernelLoaderSpec::SymbolResolver>&
+        symbol_resolver) {
+  TF_ASSIGN_OR_RETURN(
+      CustomKernel custom_kernel,
+      CustomKernel::FromProto(proto.custom_kernel(), symbol_resolver));
+  std::vector<BufferAllocation::Slice> args;
+  args.reserve(proto.args_size());
+  for (const buffer_assignment::BufferAllocationSliceProto& arg_proto :
+       proto.args()) {
+    TF_ASSIGN_OR_RETURN(
+        args.emplace_back(),
+        BufferAllocation::Slice::FromProto(arg_proto, buffer_allocations));
+  }
+  std::vector<bool> written{proto.written().begin(), proto.written().end()};
+  return absl::WrapUnique(new CustomKernelThunk(std::move(thunk_info),
+                                                std::move(custom_kernel), args,
+                                                std::move(written)));
 }
 
 }  // namespace gpu

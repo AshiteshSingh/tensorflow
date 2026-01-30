@@ -477,17 +477,17 @@ class BiasGradOp<GPUDevice, T> : public OpKernel {
     // Autotune two algorithm: customized
     BiasAddGradGPUConfig algo_config;
     if (!AutotuneBiasGrad::GetInstance()->Find(bias_parameters, &algo_config)) {
-      profiler::ScopedAnnotation trace("bias_grad_autotuning");
+      tsl::profiler::ScopedAnnotation trace("bias_grad_autotuning");
 
       BiasGradGPUProfileResult best_result;
 
       // Initialize the timer.
-      StatusOr<std::unique_ptr<se::EventBasedTimer>> timer =
+      absl::StatusOr<std::unique_ptr<stream_executor::EventBasedTimer>> timer =
           stream->CreateEventBasedTimer(false);
       OP_REQUIRES_OK(context, timer.status());
       ComputeWithCustomKernel(context, output_backprop, batch, width, height,
                               depth, channel, output);
-      StatusOr<absl::Duration> bias_duration =
+      absl::StatusOr<absl::Duration> bias_duration =
           timer.value()->GetElapsedDuration();
       OP_REQUIRES_OK(context, bias_duration.status());
       int64_t elapsed_microseconds = absl::ToInt64Microseconds(*bias_duration);
@@ -500,12 +500,12 @@ class BiasGradOp<GPUDevice, T> : public OpKernel {
       }
 
       // Try reduction and profile.
-      StatusOr<std::unique_ptr<se::EventBasedTimer>> reduction_timer =
-          stream->CreateEventBasedTimer(false);
+      absl::StatusOr<std::unique_ptr<stream_executor::EventBasedTimer>>
+          reduction_timer = stream->CreateEventBasedTimer(false);
       OP_REQUIRES_OK(context, reduction_timer.status());
       ComputeWithReduceSum(context, output_backprop, batch, width, height,
                            depth, channel, output);
-      StatusOr<absl::Duration> reduction_duration =
+      absl::StatusOr<absl::Duration> reduction_duration =
           reduction_timer.value()->GetElapsedDuration();
       OP_REQUIRES_OK(context, reduction_duration.status());
 

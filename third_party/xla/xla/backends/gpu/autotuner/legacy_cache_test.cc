@@ -26,6 +26,7 @@ limitations under the License.
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/status/status.h"
+#include "xla/autotuning.pb.h"
 #include "xla/backends/autotuner/autotuner_cache.pb.h"
 #include "xla/backends/autotuner/autotuner_cache_interface.h"
 #include "xla/hlo/ir/hlo_instruction.h"
@@ -37,6 +38,7 @@ limitations under the License.
 #include "xla/tsl/platform/env.h"
 #include "xla/tsl/platform/statusor.h"
 #include "xla/tsl/protobuf/dnn.pb.h"
+#include "xla/xla.pb.h"
 
 namespace xla {
 namespace gpu {
@@ -112,6 +114,13 @@ class LegacyCacheTest : public ::testing::Test {
     Config config;
     config.codegen_backend_name = "Cudnn";
     config.backend_config.PackFrom(stream_executor::dnn::AlgorithmProto());
+    return config;
+  }
+
+  Config CreateDummyCustomKernelFissionConfig() {
+    Config config;
+    config.codegen_backend_name = "CustomKernel_fission";
+    config.backend_config.PackFrom(AutotuneResult::CustomKernelFusionKey());
     return config;
   }
 
@@ -208,9 +217,17 @@ TEST_F(LegacyCacheTest, InsertAndLookupCudnn) {
   EXPECT_THAT(cache.Lookup(instr.get()), Optional(ConfigEq(config)));
 }
 
-TEST_F(LegacyCacheTest, InsertAndLookupOther) {
+TEST_F(LegacyCacheTest, InsertAndLookupCustomKernelFission) {
   auto cache = LegacyCache(test_dir_, mode_, device_desc_);
   auto instr = CreateDummyInstr("hlo4");
+  Config config = CreateDummyCustomKernelFissionConfig();
+  TF_ASSERT_OK(cache.Insert(instr.get(), config));
+  EXPECT_THAT(cache.Lookup(instr.get()), Optional(ConfigEq(config)));
+}
+
+TEST_F(LegacyCacheTest, InsertAndLookupOther) {
+  auto cache = LegacyCache(test_dir_, mode_, device_desc_);
+  auto instr = CreateDummyInstr("hlo5");
   Config config = CreateDummyBackendConfig();
 
   TF_ASSERT_OK(cache.Insert(instr.get(), config));

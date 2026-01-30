@@ -15,6 +15,7 @@ limitations under the License.
 
 // TODO(opensource): Use a more generic sounding preprocessor name than
 // GOOGLE_CUDA
+#include "xla/pjrt/host_memory_allocator.h"
 #if (defined(GOOGLE_CUDA) && GOOGLE_CUDA) || \
     (defined(TENSORFLOW_USE_ROCM) && TENSORFLOW_USE_ROCM)
 
@@ -485,7 +486,7 @@ Status BaseGPUDevice::InitScratchBuffers() {
   if (!scratch_) {
     DCHECK(stream_);
     size_t scratch_buffer_size = Eigen::kGpuScratchSize + sizeof(unsigned int);
-    profiler::ScopedMemoryDebugAnnotation op_annotation("ScratchBuffer");
+    tsl::profiler::ScopedMemoryDebugAnnotation op_annotation("ScratchBuffer");
     void* scratch_buffer = gpu_allocator_->AllocateRaw(
         Allocator::kAllocatorAlignment, scratch_buffer_size);
     if (scratch_buffer == nullptr) {
@@ -787,8 +788,8 @@ void BaseGPUDevice::Compute(OpKernel* op_kernel, OpKernelContext* context) {
   }
   std::unique_ptr<stream_executor::ActivateContext> scoped_activation =
       stream->parent()->Activate();
-  profiler::ScopedMemoryDebugAnnotation op_annotation(op_kernel->name_view(),
-                                                      context->step_id());
+  tsl::profiler::ScopedMemoryDebugAnnotation op_annotation(
+      op_kernel->name_view(), context->step_id());
   bool should_log_inputs_and_outputs = ShouldLogInputsAndOutputs(op_kernel);
 
   if (should_log_inputs_and_outputs) {
@@ -929,7 +930,7 @@ Status BaseGPUDevice::MaybeCopyTensorToGPU(
       done(s);
     };
 
-    profiler::ScopedAnnotation annotation("MakeTensorFromProto");
+    tsl::profiler::ScopedAnnotation annotation("MakeTensorFromProto");
     device_context_->CopyCPUTensorToDevice(
         &from, this, copy, std::move(wrapped_done),
         !timestamped_allocator_ /*sync_dst_compute*/);
@@ -950,7 +951,7 @@ Status BaseGPUDevice::MakeTensorFromProto(const TensorProto& tensor_proto,
                                    tensor_proto.DebugString());
   }
 
-  profiler::ScopedMemoryDebugAnnotation op_annotation(
+  tsl::profiler::ScopedMemoryDebugAnnotation op_annotation(
       "MakeTensorFromProto", "dynamic", parsed.dtype(),
       [&parsed]() { return parsed.shape().DebugString(); });
   if (parsed.dtype() == DT_VARIANT) {
@@ -1880,8 +1881,10 @@ Status BaseGPUDeviceFactory::CreateDevices(
     // TODO(chuanhao): Use the correct NUMA_NODE.
     const int64_t numa_node = 0;
 
-    std::unique_ptr<tsl::Allocator> pjrt_gpu_host_allocator(
-        process_state->GetGpuHostAllocator(/*options=*/{}, numa_node));
+    auto pjrt_gpu_host_allocator =
+        std::make_unique<xla::BasicHostMemoryAllocator>(
+            std::unique_ptr<tsl::Allocator>(
+                process_state->GetGpuHostAllocator(/*options=*/{}, numa_node)));
 
     if (populate_pjrt_gpu_client_creation_info &&
         !should_create_new_pjrt_client) {

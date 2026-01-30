@@ -29,10 +29,9 @@ namespace gpu {
 absl::Status Run(const std::string& filename) {
   auto mlir_context = GetMlirContextForTest();
   mlir_context.loadAllAvailableDialects();
-  SymbolicExprContext symbolic_expr_context(&mlir_context);
+  RegisterSymbolicExprStorage(&mlir_context);
   TF_ASSIGN_OR_RETURN(auto module, LoadTestModule(filename));
-  TF_ASSIGN_OR_RETURN(auto emitter_data,
-                      GetEmitter(*module, symbolic_expr_context));
+  TF_ASSIGN_OR_RETURN(auto emitter_data, GetEmitter(*module, mlir_context));
   TF_ASSIGN_OR_RETURN(auto mlir_module,
                       emitter_data->emitter->CreateMLIRModule(
                           mlir_context, *emitter_data->fusion, "main",
