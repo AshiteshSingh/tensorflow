@@ -6,7 +6,7 @@ load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 licenses(["notice"])
 
 package(
-    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:LICENSE"],
     default_visibility = [
         ":friends",
         "//tensorflow:__pkg__",
@@ -21,6 +21,7 @@ package_group(
         "//tensorflow/lite/python/...",
         "//tensorflow/lite/python/converter/...",
         "//tensorflow/lite/toco/...",
+        "//third_party/odml/litert/litert/...",
     ],
 )
 

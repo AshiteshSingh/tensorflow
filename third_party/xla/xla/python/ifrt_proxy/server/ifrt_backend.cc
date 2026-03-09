@@ -108,8 +108,8 @@ absl::StatusOr<IfrtArrayRef> MakeStringArrayFromHostBuffer(
   const void* data = string_host_buffer.data();
 
   return client->MakeArrayFromHostBuffer(
-      data, dtype, std::move(shape), std::move(byte_strides),
-      std::move(sharding),
+      data, dtype, std::move(shape), byte_strides, std::move(sharding),
+      /*layout=*/nullptr,
       xla::ifrt::Client::HostBufferSemantics::kImmutableUntilTransferCompletes,
       /*on_done_with_host_buffer=*/
       [host_buffer = std::move(host_buffer),
@@ -803,7 +803,7 @@ absl::StatusOr<BackendInterface::Response> IfrtBackend::HandleInit(
     for (const auto* device : memory->Devices()) {
       m->add_device_ids(device->Id().value());
     }
-    m->set_debug_string(AsProtoStringData(memory->DebugString()));
+    m->set_debug_string(AsProtoStringData(absl::StrCat(memory)));
     m->set_to_string(AsProtoStringData(memory->ToString()));
   }
   client_->Attributes().ToProto(*init_resp->mutable_client_attributes(),

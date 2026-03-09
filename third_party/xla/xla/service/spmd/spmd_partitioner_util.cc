@@ -56,6 +56,7 @@ limitations under the License.
 #include "xla/service/pattern_matcher.h"
 #include "xla/service/shape_inference.h"
 #include "xla/service/spmd/spmd_partitioner.h"
+#include "xla/service/spmd/spmd_partitioner_util_internal.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/util.h"
@@ -300,7 +301,7 @@ bool EvenlyPartitions(const Shape& shape, const HloSharding& sharding) {
   if (sharding.IsManual()) {
     return true;
   }
-  if (sharding.IsTileMaximal()) {
+  if (sharding.IsReplicatedOrSingleDevice()) {
     return sharding.IsReplicated();
   }
   if (shape.IsArray()) {
@@ -358,7 +359,7 @@ Shape MakeNonPaddedShapeForGivenPartition(const Shape& shape,
   if (sharding.IsReplicated()) {
     return shape;
   }
-  if (sharding.IsTileMaximal()) {
+  if (sharding.IsReplicatedOrSingleDevice()) {
     if (partition_id == *sharding.UniqueDevice()) {
       return shape;
     }
@@ -398,7 +399,7 @@ std::vector<HloInstruction*> MakePartitionOffsets(
 
 std::vector<HloInstruction*> MakeTiledPartitionOrdinals(
     const HloSharding& sharding, HloInstruction* partition_id, SpmdBuilder* b) {
-  CHECK(!sharding.IsTileMaximal());
+  CHECK(!sharding.IsReplicatedOrSingleDevice());
   auto dimensions = sharding.dimensions();
   if (sharding.ReplicateOnLastTileDim()) {
     dimensions.remove_suffix(1);
@@ -409,7 +410,7 @@ std::vector<HloInstruction*> MakeTiledPartitionOrdinals(
 
 Shape GetPaddedShapeForUnevenPartitioning(const Shape& base_shape,
                                           const HloSharding& sharding) {
-  if (sharding.IsTileMaximal()) {
+  if (sharding.IsReplicatedOrSingleDevice()) {
     return base_shape;
   }
   if (EvenlyPartitions(base_shape, sharding)) {
@@ -747,7 +748,7 @@ std::optional<HloSharding> PartialReplicateReshardCompatibleSharding(
 std::optional<HloInstruction*> TileToPartialReplicateHaloExchange(
     HloInstruction* hlo, const Shape& base_shape,
     const HloSharding& src_sharding, const HloSharding& dst_sharding,
-    const std::vector<int64_t>& replicate_dims,
+    absl::Span<const int64_t> replicate_dims,
     const SPMDCollectiveOpsCreator& collective_ops_creator,
     int64_t* next_channel_id, HloInstruction* partition_id, SpmdBuilder* b) {
   // Source is tile sharding.
@@ -817,7 +818,7 @@ std::optional<HloInstruction*> TileToPartialReplicateHaloExchange(
 std::optional<HloInstruction*> PadFromPartialReplicateShape(
     HloInstruction* hlo, const Shape& base_shape,
     const HloSharding& src_sharding, const HloSharding& dst_sharding,
-    const std::vector<int64_t>& expand_tile_dims,
+    absl::Span<const int64_t> expand_tile_dims,
     const SPMDCollectiveOpsCreator& collective_ops_creator,
     int64_t* next_channel_id, HloInstruction* partition_id, SpmdBuilder* b) {
   auto padded_src_shape =
@@ -904,7 +905,7 @@ std::optional<HloInstruction*> PadFromPartialReplicateShape(
 }
 
 std::optional<int64_t> UniqueTiledDim(const HloSharding& sharding) {
-  if (sharding.IsTileMaximal()) {
+  if (sharding.IsReplicatedOrSingleDevice()) {
     return std::nullopt;
   }
   int64_t dim = -1;
@@ -1916,7 +1917,7 @@ std::optional<HloInstruction*> ExchangeHaloAndGetValidData(
 
 HloInstruction* HaloExchangeToPadOnLeft(PartitionedHlo& original,
                                         absl::Span<const int64_t> dims) {
-  if (original.sharding().IsTileMaximal()) {
+  if (original.sharding().IsReplicatedOrSingleDevice()) {
     return original.hlo();
   }
   // Create a window config to halo exchange for unevenly partitioned reverse
@@ -2072,7 +2073,7 @@ std::optional<int64_t> GetKValueInTopKWhenPartitionSortDim(
   }
   const HloSharding& sharding = sort->operand(0)->sharding();
 
-  if (sharding.IsTileMaximal()) {
+  if (sharding.IsReplicatedOrSingleDevice()) {
     return std::nullopt;
   }
 
@@ -2120,7 +2121,7 @@ HloInstruction* SliceFirstK(HloInstruction* hlo, SpmdBuilder* builder,
 
 // Check if a dimension is sharded.
 int64_t ShardCountAtDim(const HloSharding& sharding, int64_t dim) {
-  if (sharding.IsTileMaximal()) {
+  if (sharding.IsReplicatedOrSingleDevice()) {
     return 1;
   }
   if (dim == -1) {
@@ -2134,7 +2135,8 @@ int64_t ShardCountAtDim(const HloSharding& sharding, int64_t dim) {
 std::optional<std::vector<std::pair<int64_t, int64_t>>>
 GetReshardAllToAllSourceTargetDims(const HloSharding& source,
                                    const HloSharding& target) {
-  if (source.IsTileMaximal() || target.IsTileMaximal() ||
+  if (source.IsReplicatedOrSingleDevice() ||
+      target.IsReplicatedOrSingleDevice() ||
       source.num_dimensions() != target.num_dimensions() ||
       source.NumTiles() != target.NumTiles()) {
     return std::nullopt;
@@ -2218,7 +2220,8 @@ GetReshardAllToAllSourceTargetDims(const HloSharding& source,
 
 bool CanReshardWithCollectivePermute(const HloSharding& source,
                                      const HloSharding& target) {
-  return !source.IsTileMaximal() && !target.IsTileMaximal() &&
+  return !source.IsReplicatedOrSingleDevice() &&
+         !target.IsReplicatedOrSingleDevice() &&
          source.dimensions() == target.dimensions() &&
          source.ReplicateOnLastTileDim() == target.ReplicateOnLastTileDim() &&
          source.tile_assignment() != target.tile_assignment();
@@ -2299,7 +2302,8 @@ std::optional<GroupedSharding> AlignGroupsWithInternal(
       }
     }
   }
-  if (matching_groups && !grouped_sharding.sharding.IsTileMaximal()) {
+  if (matching_groups &&
+      !grouped_sharding.sharding.IsReplicatedOrSingleDevice()) {
     auto tiles = [&] {
       auto array =
           grouped_sharding.sharding.tile_assignment().shared_array_clone();
@@ -2437,7 +2441,7 @@ HloInstruction* PerGroupSliceFromReplicated(
 std::optional<std::vector<int64_t>> FindMatchingPartitionedDimsForGrouping(
     const HloSharding& sharding,
     const hlo_sharding_util::DeviceGroupTileAssignment& device_groups) {
-  if (sharding.IsTileMaximal() || device_groups.num_groups() < 2) {
+  if (sharding.IsReplicatedOrSingleDevice() || device_groups.num_groups() < 2) {
     return std::nullopt;
   }
   const int64_t num_devices = sharding.num_devices();
@@ -2685,17 +2689,17 @@ std::optional<PadWithWrapPattern> FindPadWithWrapPattern(
       }
       inst = inst->operand(0);
     }
-    return std::make_pair(modifiers, inst);
+    return std::pair{modifiers, inst};
   };
 
   PadWithWrapPattern pad_pattern;
-  auto skip_result = skip_elementwise_ops(lhs);
-  pad_pattern.lhs_modifiers = std::move(skip_result.first);
-  lhs = skip_result.second;
+  auto [lhs_modifiers, lhs_inst] = skip_elementwise_ops(lhs);
+  pad_pattern.lhs_modifiers = std::move(lhs_modifiers);
+  lhs = lhs_inst;
 
-  skip_result = skip_elementwise_ops(rhs);
-  pad_pattern.rhs_modifiers = std::move(skip_result.first);
-  rhs = skip_result.second;
+  auto [rhs_modifiers, rhs_inst] = skip_elementwise_ops(rhs);
+  pad_pattern.rhs_modifiers = std::move(rhs_modifiers);
+  rhs = rhs_inst;
 
   const int64_t dim = concat->concatenate_dimension();
   if (lhs->opcode() != HloOpcode::kSlice ||
@@ -2987,9 +2991,9 @@ std::unique_ptr<CollectiveDeviceListBase> GetPartitionGroupsForReplication(
       GetListOfListsPartitionGroupsForReplication(sharding, replication_dims));
 }
 
-CollectiveDeviceList GetPartitionGroupsAcrossTargetDims(
-    const HloSharding& sharding, std::vector<int64_t> target_dims,
-    std::vector<int64_t> group_sizes) {
+CollectiveDeviceList GetListOfListsPartitionGroupsAcrossTargetDims(
+    const HloSharding& sharding, absl::Span<const int64_t> target_dims,
+    absl::Span<const int64_t> group_sizes) {
   CHECK(target_dims.size() == group_sizes.size());
   int64_t total_group_size = std::accumulate(
       group_sizes.begin(), group_sizes.end(), 1, std::multiplies<int64_t>());
@@ -3014,8 +3018,8 @@ CollectiveDeviceList GetPartitionGroupsAcrossTargetDims(
 }
 
 std::optional<IotaReplicaGroupList> GetIotaPartitionGroupsAcrossTargetDims(
-    const HloSharding& sharding, std::vector<int64_t> target_dims,
-    std::vector<int64_t> group_sizes) {
+    const HloSharding& sharding, absl::Span<const int64_t> target_dims,
+    absl::Span<const int64_t> group_sizes) {
   CHECK(target_dims.size() == group_sizes.size());
   // If provided sharding is not HloShardingV2, we cannot generate partition
   // groups in an iota format.
@@ -3099,9 +3103,9 @@ std::optional<IotaReplicaGroupList> GetIotaPartitionGroupsAcrossTargetDims(
 }
 
 std::optional<MeshAxesReplicaGroupList>
-GetMeshAxesPartitionGroupsAcrossTargetDims(const HloSharding& sharding,
-                                           std::vector<int64_t> target_dims,
-                                           std::vector<int64_t> group_sizes) {
+GetMeshAxesPartitionGroupsAcrossTargetDims(
+    const HloSharding& sharding, absl::Span<const int64_t> target_dims,
+    absl::Span<const int64_t> group_sizes) {
   CHECK_EQ(target_dims.size(), group_sizes.size())
       << "target_dims and group_sizes must have the same size.";
   if (target_dims.empty()) {
@@ -3132,9 +3136,27 @@ GetMeshAxesPartitionGroupsAcrossTargetDims(const HloSharding& sharding,
   return MeshAxesReplicaGroupList(mesh.value(), axis_refs);
 }
 
+std::unique_ptr<CollectiveDeviceListBase> GetPartitionGroupsAcrossTargetDims(
+    const HloSharding& sharding, absl::Span<const int64_t> target_dims,
+    absl::Span<const int64_t> group_sizes) {
+  if (std::optional<MeshAxesReplicaGroupList> mesh_axes_groups =
+          GetMeshAxesPartitionGroupsAcrossTargetDims(sharding, target_dims,
+                                                     group_sizes)) {
+    return std::make_unique<MeshAxesReplicaGroupList>(*mesh_axes_groups);
+  }
+  if (std::optional<IotaReplicaGroupList> iota_groups =
+          GetIotaPartitionGroupsAcrossTargetDims(sharding, target_dims,
+                                                 group_sizes)) {
+    return std::make_unique<IotaReplicaGroupList>(*iota_groups);
+  }
+  return std::make_unique<CollectiveDeviceList>(
+      GetListOfListsPartitionGroupsAcrossTargetDims(sharding, target_dims,
+                                                    group_sizes));
+}
+
 // Expands partition group list across all replicas. Expects that provided
 // partition group list utilizes all the partitions.
-CollectiveDeviceList ExpandPartitionGroupListAcrossReplicas(
+IotaReplicaGroupList ExpandPartitionGroupListAcrossReplicas(
     IotaReplicaGroupList partition_group_list, int64_t num_replicas,
     int64_t num_partitions) {
   int64_t partition_group_count = partition_group_list.num_replica_groups();
@@ -3162,9 +3184,8 @@ CollectiveDeviceList ExpandPartitionGroupListAcrossReplicas(
     new_transpose_dims.push_back(dim + 1);
   }
 
-  return CollectiveDeviceList(
-      IotaReplicaGroupList(replica_group_count, partition_group_size,
-                           new_reshape_dims, new_transpose_dims));
+  return IotaReplicaGroupList(replica_group_count, partition_group_size,
+                              new_reshape_dims, new_transpose_dims);
 }
 
 PartitionedHlo MakeACopyAndReturnItsPartitionedHlo(const PartitionedHlo& phlo,
@@ -3177,7 +3198,7 @@ PartitionedHlo MakeACopyAndReturnItsPartitionedHlo(const PartitionedHlo& phlo,
 
 DynamicUpdateSliceAnalysis AnalyzeDynamicUpdateSlice(
     const HloInstruction* hlo) {
-  CHECK(!hlo->sharding().IsTileMaximal());
+  CHECK(!hlo->sharding().IsReplicatedOrSingleDevice());
 
   DynamicUpdateSliceAnalysis analysis;
 

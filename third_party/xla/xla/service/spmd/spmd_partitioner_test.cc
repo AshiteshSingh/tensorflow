@@ -535,9 +535,9 @@ ENTRY entry {
   EXPECT_TRUE(all_gather->device_list().version() ==
               CollectiveDeviceListVersion::kIota);
   EXPECT_EQ(all_gather->device_list(),
-            CollectiveDeviceList(IotaReplicaGroupList(
+            IotaReplicaGroupList(
                 /*num_replica_groups=*/1, /*num_devices_per_group=*/4,
-                /*reshape_dims=*/{4}, /*transpose_perm=*/{0})));
+                /*reshape_dims=*/{4}, /*transpose_perm=*/{0}));
 }
 
 TEST_P(SpmdPartitioningTest, TiledToSingleDevice) {
@@ -598,9 +598,9 @@ ENTRY entry {
   EXPECT_EQ(all_to_all->replica_groups()[0].replica_ids_size(), 8);
   if (GetParam() == ShardingFormatPicker::ShardingType::kBestEffortV2) {
     EXPECT_EQ(all_to_all->device_list(),
-              CollectiveDeviceList(IotaReplicaGroupList(
+              IotaReplicaGroupList(
                   /*num_replica_groups=*/1, /*num_devices_per_group=*/8,
-                  /*reshape_dims=*/{4, 2}, /*transpose_perm=*/{1, 0})));
+                  /*reshape_dims=*/{4, 2}, /*transpose_perm=*/{1, 0}));
   } else {
     std::vector<std::vector<int64_t>> expected_replica_groups = {
         {0, 2, 4, 6, 1, 3, 5, 7}};
@@ -2011,9 +2011,9 @@ ENTRY entry {
   EXPECT_EQ((*all_reduce_instruction)->device_list().version(),
             CollectiveDeviceListVersion::kIota);
   EXPECT_EQ((*all_reduce_instruction)->device_list(),
-            CollectiveDeviceList(IotaReplicaGroupList(
+            IotaReplicaGroupList(
                 /*num_replica_groups=*/1, /*num_devices_per_group=*/8,
-                /*reshape_dims=*/{8}, /*transpose_perm=*/{0})));
+                /*reshape_dims=*/{8}, /*transpose_perm=*/{0}));
 }
 
 TEST_P(SpmdPartitioningTest, ConvolutionLhsTiledRhsTiledWindowReversal) {
@@ -12055,7 +12055,7 @@ ENTRY entry {
                                          ->root_instruction()
                                          ->false_computation()
                                          ->root_instruction();
-    auto operand = AllOf(op::Shape("s32[1,4,2,2]"), op::DynamicSlice());
+    auto operand = AllOf(op::Shape("s32[1,4,2,2]"), op::Broadcast());
     auto indices = AllOf(op::Shape("s32[2,1,4]"), op::Subtract());
     auto update = AllOf(op::Shape("s32[1,4,2,2]"), op::DynamicSlice());
     auto scatter =
@@ -12154,11 +12154,9 @@ ENTRY %module {
     EXPECT_EQ(all_to_all->device_list().version(),
               CollectiveDeviceListVersion::kIota);
     EXPECT_EQ(all_to_all->device_list(),
-              CollectiveDeviceList(IotaReplicaGroupList(
+              IotaReplicaGroupList(
                   /*num_replica_groups=*/4, /*num_devices_per_group=*/2,
-                  /*reshape_dims=*/{2, 2, 2},
-                  /*transpose_perm=*/{0, 2, 1})));
-
+                  /*reshape_dims=*/{2, 2, 2}, /*transpose_perm=*/{0, 2, 1}));
   } else {
     std::vector<std::vector<int64_t>> expected_replica_groups = {
         {0, 2}, {1, 3}, {4, 6}, {5, 7}};
@@ -13074,7 +13072,7 @@ ENTRY main.22 {
   const auto root = module->entry_computation()->root_instruction();
   auto operand = AllOf(op::Shape("f32[16,2]"), op::Broadcast());
   auto indices = AllOf(op::Shape("s32[8,2]"), op::Subtract());
-  auto update = AllOf(op::Shape("f32[8]"), op::AllGather());
+  auto update = AllOf(op::Shape("f32[8]"), op::Broadcast(op::Constant()));
   EXPECT_THAT(root, AllOf(op::Shape("f32[16,2]"),
                           op::Scatter(operand, indices, update)));
 }
@@ -15063,9 +15061,7 @@ TEST_P(SpmdPartitioningTest, AddBroadcastWithEnzymeOpt) {
 )hlo";
 
   TF_ASSERT_OK_AND_ASSIGN(auto module,
-                          PartitionComputation(hlo_string, /*num_devices=*/4,
-                                               SpmdPartitionerOptions(),
-                                               /*enable_enzyme_opt=*/true));
+                          PartitionComputation(hlo_string, /*num_devices=*/4));
 
   const auto root = module->entry_computation()->root_instruction();
   auto sharded_input = AllOf(op::Parameter(1), op::Shape("f32[]"));
@@ -16485,6 +16481,7 @@ ENTRY entry {
   EXPECT_THAT(replica_groups[0].replica_ids(), ::testing::ElementsAre(0, 1));
 }
 
+// TODO(b/489091261): Test V3 dot handler.
 TEST_P(SpmdPartitioningTest, UnreducedDot) {
   absl::string_view hlo_string = R"(
 HloModule module
@@ -16520,6 +16517,24 @@ ENTRY entry {
               ::testing::Each(op::Sharding("{unreduced}")));
 }
 
+TEST_P(SpmdPartitioningTest, UnreducedParamV3) {
+  absl::string_view hlo_string = R"(
+HloModule module
+
+ENTRY entry {
+  a = s32[2,4]{1,0} parameter(0), sharding={mesh['x'=2] [{},{}], unreduced={'x'}}
+  b = s32[2,4]{1,0} parameter(1), sharding={mesh['x'=2] [{},{}], unreduced={'x'}}
+  ROOT add = s32[2,4]{1,0} add(a, b)
+})";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          PartitionComputation(hlo_string, /*num_devices=*/2));
+  // Check that unreduced HloSharding is preserved after the pass.
+  for (auto* param : module->entry_computation()->parameter_instructions()) {
+    EXPECT_THAT(param->sharding().ToString(),
+                ::testing::HasSubstr("unreduced"));
+  }
+}
+
 TEST_P(SpmdPartitioningTest, SubgroupUnreducedParam) {
   absl::string_view hlo_string = R"(
 HloModule module
@@ -16538,6 +16553,23 @@ ENTRY entry {
                   "{devices=[1,2,2]<=[4] last_tile_dims={unreduced}}")));
 }
 
+TEST_P(SpmdPartitioningTest, SubgroupUnreducedParamV3) {
+  absl::string_view hlo_string = R"(
+HloModule module
+
+ENTRY entry {
+  a = s32[2,4]{1,0} parameter(0), sharding={mesh['x'=2,'y'=2] [{?},{'x'}], unreduced={'y'}}
+  ROOT add = s32[2,4]{1,0} add(a, a)
+})";
+  TF_ASSERT_OK_AND_ASSIGN(auto module,
+                          PartitionComputation(hlo_string, /*num_devices=*/4));
+  // Check that unreduced HloSharding is preserved after the pass.
+  EXPECT_THAT(module->entry_computation()->parameter_instructions(),
+              ::testing::Each(op::Sharding(
+                  "{mesh['x'=2,'y'=2] [{?},{'x'}], unreduced={'y'}}")));
+}
+
+// TODO(b/489091261): Test V3 dot handler.
 TEST_P(SpmdPartitioningTest, SubgroupUnreducedDot) {
   absl::string_view hlo_string = R"(
 HloModule module
@@ -16554,6 +16586,7 @@ ENTRY entry {
   EXPECT_EQ(FindInstruction(module.get(), HloOpcode::kAllReduce), nullptr);
 }
 
+// TODO(b/489091261): Test V3 dot handler.
 TEST_P(SpmdPartitioningTest, SubgroupUnreducedAndReplicated) {
   absl::string_view hlo_string = R"(
 HloModule module

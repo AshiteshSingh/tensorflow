@@ -502,7 +502,7 @@ absl::StatusOr<std::vector<xla::ifrt::ArrayRef>> Array::RemapArrays(
     if (plan.input_specs[i].shape != arrays[i]->shape()) {
       return absl::InvalidArgumentError(absl::StrFormat(
           "RemapArrays expects input #%d to have shape %v, but got %v", i,
-          plan.input_specs[i].shape, arrays[i]->shape().DebugString()));
+          plan.input_specs[i].shape, arrays[i]->shape()));
     }
     // Skip xla::ifrt::Sharding::HasSamePartitioning() check because RemapArrays
     // is currently called with input arrays with implicit sharding
@@ -548,6 +548,14 @@ absl::StatusOr<std::vector<xla::ifrt::ArrayRef>> Array::RemapArrays(
   }
   rpc_helper->RemapArrays(std::move(req));
   return result;
+}
+
+absl::StatusOr<std::vector<xla::ifrt::ArrayRef>> Array::BitcastArrays(
+    xla::ifrt::Client* client, std::shared_ptr<RpcHelper> rpc_helper,
+    absl::Span<xla::ifrt::ArrayRef> arrays,
+    absl::Span<const xla::ifrt::ArraySpec> specs,
+    ArrayCopySemantics semantics) {
+  return absl::UnimplementedError("BitcastArrays is not implemented.");
 }
 
 absl::StatusOr<::google::protobuf::RepeatedField<uint64_t>> Array::GetHandles(
