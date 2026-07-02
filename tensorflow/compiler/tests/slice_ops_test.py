@@ -151,6 +151,19 @@ class StridedSliceTest(xla_test.XLATestCase):
 
         self.assertAllEqual([0], result)
 
+  def testDynamicSliceOutOfBounds(self):
+    for dtype in self.numeric_types:
+      with self.session():
+        i = array_ops.placeholder(dtype, shape=[10])
+        begin = array_ops.placeholder(dtypes.int32, shape=[1])
+        end = array_ops.placeholder(dtypes.int32, shape=[1])
+        with self.test_scope():
+          o = array_ops.strided_slice(i, begin, end, [1])
+        params = {i: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], begin: [5], end: [15]}
+        result = o.eval(feed_dict=params)
+
+        self.assertAllEqual([5, 6, 7, 8, 9], result)
+
   def test1DNegativeStride(self):
     for dtype in self.numeric_types:
       with self.session():
@@ -191,6 +204,16 @@ class StridedSliceTest(xla_test.XLATestCase):
         result = o.eval(feed_dict=params)
 
         self.assertEqual(tensor_shape.TensorShape((0, 3)), result.shape)
+
+  def test2DDegenerateFromWhere(self):
+    with self.session():
+      with self.test_scope():
+        x = array_ops.placeholder(dtypes.bool)
+        indices = array_ops.where(x)
+        o = array_ops.strided_slice(indices, [-1, 0], [0, 3])
+      result = o.eval(feed_dict={x: [True, False, True]})
+
+      self.assertEqual(tensor_shape.TensorShape((0, 1)), result.shape)
 
   def test2DFullSlice(self):
     for dtype in self.numeric_types:

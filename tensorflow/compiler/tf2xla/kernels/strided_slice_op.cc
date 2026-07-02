@@ -194,6 +194,9 @@ class StridedSliceOp : public XlaOpKernel {
           begin_index = xla::Select(index_negative, wrapped_index, begin_index);
         }
       }
+      if (result_dims_are_dynamic[i]) {
+        begin_index = xla::Max(xla::Min(begin_index, dim_size), zero);
+      }
       start_indices.push_back(begin_index);
       if (end_mask) {
         end_index = dim_size;
@@ -207,6 +210,9 @@ class StridedSliceOp : public XlaOpKernel {
           auto wrapped_index = xla::Add(dim_size, end_index);
           end_index = xla::Select(index_negative, wrapped_index, end_index);
         }
+      }
+      if (result_dims_are_dynamic[i]) {
+        end_index = xla::Max(xla::Min(end_index, dim_size), zero);
       }
       // This is safe to downcast as set dimension size  makes sure that the dim
       // in the input doesn't exceed INT32 max.
@@ -380,11 +386,14 @@ class StridedSliceOp : public XlaOpKernel {
             }
             operand_size = xla::Min(operand_size, end_size);
           }
-          slice = xla::SetDimensionSize(
-              slice,
-              xla::Sub(operand_size, xla::ConstantR0<int32_t>(
-                                         ctx->builder(), begin[input_index])),
-              i);
+          // Degenerate slices can produce begin > end after index wrapping;
+          // dynamic dimension sizes must stay non-negative.
+          xla::XlaOp dim_size = xla::Sub(
+              operand_size,
+              xla::ConstantR0<int32_t>(ctx->builder(), begin[input_index]));
+          dim_size =
+              xla::Max(dim_size, xla::ConstantR0<int32_t>(ctx->builder(), 0));
+          slice = xla::SetDimensionSize(slice, dim_size, i);
         }
       }
       ctx->SetOutput(0, slice);
