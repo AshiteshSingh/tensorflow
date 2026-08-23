@@ -20,6 +20,7 @@ py_test(
         "//xla/backends/cpu/testlib",
         "//xla/codegen/testlib",
         "@absl_py//absl/testing:absltest",
+        "@absl_py//absl/testing:parameterized",
     ],
 )
 
@@ -29,6 +30,7 @@ cc_library(
     hdrs = ["tiled_fusion_emitter.h"],
     visibility = [
         "//xla/backends/cpu/codegen:__pkg__",
+        "//xla/backends/cpu/codegen/tiled/tools:__pkg__",
         "//xla/service/cpu:__pkg__",
     ],
     deps = [
@@ -46,6 +48,8 @@ cc_library(
         "//xla/codegen/tiling:tiling_specification",
         "//xla/codegen/tiling/experimental:tile",
         "//xla/codegen/tiling/experimental:tiled_hlo",
+        "//xla/codegen/xtile:block_level_parameters",
+        "//xla/codegen/xtile:tiling_from_block_parameters",
         "//xla/codegen/xtile/codegen:emitter_helpers",
         "//xla/codegen/xtile/codegen:fusion_emitter",
         "//xla/codegen/xtile/codegen:tiled_emitter_constraints",
@@ -57,14 +61,15 @@ cc_library(
         "//xla/service:buffer_assignment",
         "//xla/service:instruction_fusion",
         "//xla/service/cpu:cpu_options",
-        "//xla/tsl/platform:status_macros",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:status_macros",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/types:span",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:IR",
     ],

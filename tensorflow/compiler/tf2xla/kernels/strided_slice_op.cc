@@ -298,6 +298,14 @@ class StridedSliceOp : public XlaOpKernel {
                           "shape for strided slice: ",
                           partial_final_shape.DebugString(),
                           ", output shape must be a compile-time constant"));
+
+      if (final_shape.num_elements() == 0) {
+        xla::XlaOp zero = xla::Zero(ctx->builder(), ctx->input_xla_type(0));
+        xla::XlaOp slice = xla::Broadcast(zero, final_shape.dim_sizes());
+        ctx->SetOutput(0, slice);
+        return;
+      }
+
       absl::InlinedVector<int64_t, 4> dimensions_to_reverse;
       absl::InlinedVector<int64_t, 4> slice_begin, slice_end, slice_strides;
       for (int i = 0; i < begin.size(); ++i) {
@@ -386,14 +394,20 @@ class StridedSliceOp : public XlaOpKernel {
             }
             operand_size = xla::Min(operand_size, end_size);
           }
-          // Degenerate slices can produce begin > end after index wrapping;
-          // dynamic dimension sizes must stay non-negative.
-          xla::XlaOp dim_size = xla::Sub(
-              operand_size,
-              xla::ConstantR0<int32_t>(ctx->builder(), begin[input_index]));
-          dim_size =
-              xla::Max(dim_size, xla::ConstantR0<int32_t>(ctx->builder(), 0));
-          slice = xla::SetDimensionSize(slice, dim_size, i);
+          // Clamp the runtime size to zero, matching the dynamic-index
+          // branch above (line 219). Without the clamp, a bounded-dynamic
+          // input paired with static bounds that produce a degenerate
+          // interval (e.g. tf.strided_slice(dyn, [-1, 0], [0, 3])) emits
+          // set-dimension-size with a negative runtime value, which
+          // XLA:CPU codegens into a fused kernel that segfaults on launch
+          // (issue #124950).
+          slice = xla::SetDimensionSize(
+              slice,
+              xla::Max(xla::Sub(operand_size,
+                                xla::ConstantR0<int32_t>(ctx->builder(),
+                                                         begin[input_index])),
+                       xla::ConstantR0<int32_t>(ctx->builder(), 0)),
+              i);
         }
       }
       ctx->SetOutput(0, slice);

@@ -31,7 +31,8 @@ namespace ynnpack {
 
 TfLiteStatus IsReductionSupported(const TfLiteRegistration* registration,
                                   const TfLiteNode* node,
-                                  TfLiteContext* context) {
+                                  TfLiteContext* context,
+                                  const TfLiteYNNPackDelegateOptions& options) {
   TF_LITE_ENSURE_EQ(context, node->inputs->size, 2);
   TF_LITE_ENSURE_EQ(context, node->outputs->size, 1);
 
@@ -40,19 +41,14 @@ TfLiteStatus IsReductionSupported(const TfLiteRegistration* registration,
   const TfLiteTensor& axes = context->tensors[node->inputs->data[1]];
   const TfLiteTensor& output = context->tensors[node->outputs->data[0]];
 
-  ynn_type input_ynn_type = GetYnnType(input.type);
-  ynn_type output_ynn_type = GetYnnType(output.type);
-  TF_LITE_ENSURE(context, input_ynn_type != ynn_type_invalid);
-  TF_LITE_ENSURE(context, output_ynn_type != ynn_type_invalid);
+  TF_LITE_ENSURE(context, IsTensorSupported(input));
+  TF_LITE_ENSURE(context, IsTensorSupported(output));
 
   TF_LITE_ENSURE_EQ(context, input.type, output.type);
 
-  TF_LITE_ENSURE(context, IsSupportedQuantization(input));
-  TF_LITE_ENSURE(context, IsSupportedQuantization(output));
-
   TF_LITE_ENSURE(context, QuantizationParamsEqual(input, output));
 
-  TF_LITE_ENSURE(context, axes.allocation_type == kTfLiteMmapRo);
+  TF_LITE_ENSURE(context, IsConstant(axes, options.static_shape));
   TF_LITE_ENSURE_EQ(context, axes.type, kTfLiteInt32);
 
   // YNNPACK reduce only supports 0D or 1D axes for now.

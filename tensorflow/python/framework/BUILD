@@ -362,6 +362,7 @@ py_library(
         "constant_op.py",
         "constant_tensor_conversion.py",
     ],
+    lazy_imports = True,
     strict_deps = True,
     visibility = visibility + [
         "//tensorflow:internal",
@@ -425,6 +426,7 @@ tf_python_pybind_extension(
 py_library(
     name = "dtypes",
     srcs = ["dtypes.py"],
+    lazy_imports = True,
     strict_deps = True,
     # copybara:uncomment_begin(google-only)
     # visibility = visibility + [
@@ -629,6 +631,7 @@ py_library(
     # copybara:uncomment_begin(google-only)
     # visibility = visibility + [
     # "//learning/deepmind/deepfunc:__subpackages__",
+    # "//research/air/foundation/pterodactyl:__subpackages__",
     # "//tensorflow:internal",
     # ],
     # copybara:uncomment_end_and_comment_begin
@@ -879,13 +882,14 @@ cc_library(
         ":op_def_util_cc",
         ":python_api_info",
         ":python_tensor_converter",
-        "//tensorflow/core:framework",
         "//tensorflow/core:lib_internal",
         "//tensorflow/core:protos_all_cc",
         "//tensorflow/core/platform:status",
         "//tensorflow/python/eager:pywrap_tfe_lib",
         "//tensorflow/python/lib/core:safe_pyobject_ptr",
         "//tensorflow/python/util:cpp_python_util",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "@xla//third_party/python_runtime:headers",  # buildcleaner: keep
@@ -1021,6 +1025,8 @@ cc_library(
         "//tensorflow/python/eager:pywrap_tfe_lib",
         "//tensorflow/python/lib/core:safe_pyobject_ptr",
         "//tensorflow/python/util:cpp_python_util",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "@xla//third_party/python_runtime:headers",  # buildcleaner: keep
@@ -1065,9 +1071,11 @@ tf_python_pybind_extension(
         "//tensorflow/core/common_runtime:core_cpu_headers_lib",
         "//tensorflow/core/config:flags_headers",
         "//third_party/py/numpy:headers",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/hash",
         "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
@@ -1123,6 +1131,7 @@ cc_library(
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:inlined_vector",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
         "@xla//third_party/python_runtime:headers",  # buildcleaner: keep
     ],
     alwayslink = 1,
@@ -1418,6 +1427,7 @@ pytype_strict_library(
 py_library(
     name = "tensor_conversion_registry",
     srcs = ["tensor_conversion_registry.py"],
+    lazy_imports = True,
     strict_deps = True,
     # TODO(b/266747022): remove extra visibility
     visibility = visibility + ["//learning/brain/experimental:__subpackages__"],
@@ -1902,6 +1912,7 @@ pytype_strict_library(
     srcs = ["type_spec_registry.py"],
     visibility = visibility + ["//third_party/py/tensorflow_gnn:__subpackages__"],
     deps = [
+        "//tensorflow/python/platform:tf_logging",
         "//tensorflow/python/types:internal",
     ],
 )
